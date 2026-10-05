@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: stayx
+      POSTGRES_PASSWORD: stayx
+      POSTGRES_DB: stayx_pos
+    ports: ["5433:5432"]
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+  redis:
+    image: redis:7-alpine
+    ports: ["6380:6379"]
+volumes:
+  pgdata:
