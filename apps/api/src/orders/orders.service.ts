@@ -9,6 +9,7 @@ import { and, asc, desc, eq } from 'drizzle-orm';
 import { orderItems, orders } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { MenuService } from '../menu/menu.service.js';
+import { OrderEventsService } from '../events/order-events.service.js';
 import { canTransition, type OrderStatus } from './order-status.js';
 import { generateOrderNumber, priceOrder } from './order-pricing.js';
 import type { CreateOrderDto, ListOrdersDto } from './dto/order.dto.js';
@@ -33,19 +34,25 @@ export class OrdersService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly menuService: MenuService,
+    private readonly orderEvents: OrderEventsService,
   ) {}
 
   async create(dto: CreateOrderDto): Promise<OrderWithItems> {
     // A random 4-char suffix can collide within a day; the unique index catches
     // it and we retry the whole transaction with a fresh number.
+    let order: OrderWithItems;
     for (let attempt = 1; ; attempt++) {
       try {
-        return await this.insertOrder(dto, generateOrderNumber());
+        order = await this.insertOrder(dto, generateOrderNumber());
+        break;
       } catch (error) {
         if (attempt < MAX_ORDER_NUMBER_ATTEMPTS && isUniqueViolation(error, ORDER_NUMBER_UNIQUE)) continue;
         throw error;
       }
     }
+    // Emit only after the transaction has committed; rolled-back attempts emit nothing.
+    this.orderEvents.emitOrderCreated(order);
+    return order;
   }
 
   private insertOrder(dto: CreateOrderDto, orderNumber: string): Promise<OrderWithItems> {
@@ -117,7 +124,7 @@ export class OrdersService {
   }
 
   async updateStatus(id: string, propertyId: string, status: OrderStatus): Promise<Order> {
-    return this.db.transaction(async (tx) => {
+    const updated = await this.db.transaction(async (tx) => {
       const [current] = await tx
         .select({ status: orders.status })
         .from(orders)
@@ -131,7 +138,7 @@ export class OrdersService {
       const now = new Date();
       // Optimistic concurrency: the WHERE also pins the status we validated
       // against, so a concurrent change makes this match zero rows → 409.
-      const [updated] = await tx
+      const [row] = await tx
         .update(orders)
         .set({
           status,
@@ -141,14 +148,17 @@ export class OrdersService {
         })
         .where(and(eq(orders.id, id), eq(orders.propertyId, propertyId), eq(orders.status, current.status)))
         .returning();
-      if (!updated) {
+      if (!row) {
         throw new ConflictException(`Order ${id} was modified concurrently; reload and retry`);
       }
 
-      // Phase 3: emit order.status_changed here
       // Phase 4: on delivered, insert haip_post_outbox row in the same transaction
 
-      return updated;
+      return row;
     });
+
+    // Committed: now tell the kitchen display.
+    this.orderEvents.emitOrderStatusChanged(updated);
+    return updated;
   }
 }
