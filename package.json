@@ -8,6 +8,7 @@
     "build": "pnpm -r run build",
     "dev": "pnpm --filter @stayx/api run dev",
     "dev:kms": "pnpm --filter @stayx/kms run dev",
+    "dev:pos": "pnpm --filter @stayx/pos run dev",
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
