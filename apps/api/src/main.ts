@@ -1,3 +1,5 @@
+// Must stay the FIRST import: loads pos/.env before any module reads process.env.
+import './load-env.js';
 import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
@@ -24,6 +26,7 @@ async function bootstrap() {
     .setVersion('0.0.1')
     .addTag('menu', 'Menu items')
     .addTag('orders', 'Room-service orders')
+    .addTag('outbox', 'HAIP folio posts (delivered orders)')
     .build();
   SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
 

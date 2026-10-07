@@ -29,6 +29,7 @@
     "@nestjs/swagger": "^12.0.2",
     "@nestjs/websockets": "^12.1.2",
     "@stayx/database": "workspace:^",
+    "bullmq": "^5.81.5",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.15.1",
     "decimal.js": "^10.6.0",

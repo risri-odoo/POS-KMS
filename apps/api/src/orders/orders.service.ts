@@ -3,13 +3,16 @@ import {
   ConflictException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { and, asc, desc, eq } from 'drizzle-orm';
-import { orderItems, orders } from '@stayx/database';
+import { haipPostOutbox, orderItems, orders } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { MenuService } from '../menu/menu.service.js';
 import { OrderEventsService } from '../events/order-events.service.js';
+import { vendorTxnIdFor } from '../haip/charge-mapper.js';
+import { HaipQueue } from '../haip/haip-queue.service.js';
 import { canTransition, type OrderStatus } from './order-status.js';
 import { generateOrderNumber, priceOrder } from './order-pricing.js';
 import type { CreateOrderDto, ListOrdersDto } from './dto/order.dto.js';
@@ -31,10 +34,13 @@ function isUniqueViolation(error: unknown, constraint: string): boolean {
 
 @Injectable()
 export class OrdersService {
+  private readonly logger = new Logger(OrdersService.name);
+
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly menuService: MenuService,
     private readonly orderEvents: OrderEventsService,
+    private readonly haipQueue: HaipQueue,
   ) {}
 
   async create(dto: CreateOrderDto): Promise<OrderWithItems> {
@@ -152,13 +158,32 @@ export class OrdersService {
         throw new ConflictException(`Order ${id} was modified concurrently; reload and retry`);
       }
 
-      // Phase 4: on delivered, insert haip_post_outbox row in the same transaction
+      // Delivered: record the HAIP folio post in the SAME transaction, so a
+      // delivered order can never exist without its outbox row. The vendorTxnId
+      // is deterministic and the unique index makes a repeat a no-op.
+      let outboxId: string | undefined;
+      if (status === 'delivered') {
+        const [outbox] = await tx
+          .insert(haipPostOutbox)
+          .values({ propertyId, orderId: row.id, vendorTxnId: vendorTxnIdFor(row.id) })
+          .onConflictDoNothing({ target: [haipPostOutbox.propertyId, haipPostOutbox.vendorTxnId] })
+          .returning({ id: haipPostOutbox.id });
+        outboxId = outbox?.id;
+      }
 
-      return row;
+      return { row, outboxId };
     });
 
-    // Committed: now tell the kitchen display.
-    this.orderEvents.emitOrderStatusChanged(updated);
-    return updated;
+    // Committed. Queueing is best effort and not awaited, so a Redis outage
+    // never slows or fails the request; the sweeper picks up anything missed.
+    if (updated.outboxId) {
+      const outboxId = updated.outboxId;
+      this.haipQueue.enqueue(outboxId).catch((error: unknown) => {
+        this.logger.warn(`Could not queue HAIP post ${outboxId} (sweeper will retry): ${(error as Error)?.message ?? error}`);
+      });
+    }
+    // Tell the kitchen display.
+    this.orderEvents.emitOrderStatusChanged(updated.row);
+    return updated.row;
   }
 }
