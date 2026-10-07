@@ -2,3 +2,6 @@ node_modules
 dist
 .env
 *.tsbuildinfo
+# Machine-specific overrides (Vite convention); .env.development stays committed
+.env.local
+.env.*.local

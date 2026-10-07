@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { ApiError, listMenu, messageOf, placeOrder } from './api.js';
 import { cartReducer, cartSubtotal, emptyCart, unavailableLines } from './cart.js';
-import { propertyIdFromSearch } from './config.js';
+import { resolvePropertyId } from './config.js';
 import { formatPrice, toMinor } from './money.js';
 import { sortMenu } from './menu.js';
 import { Header, type Tab } from './components/Header.js';
@@ -13,7 +13,7 @@ import type { MenuItem } from './types.js';
 import { useOrdersFeed } from './useOrdersFeed.js';
 
 export function App() {
-  const propertyId = propertyIdFromSearch(window.location.search);
+  const propertyId = resolvePropertyId(window.location.search, import.meta.env.VITE_DEFAULT_PROPERTY_ID);
   if (!propertyId) {
     return <PropertyForm initial={new URLSearchParams(window.location.search).get('propertyId') ?? ''} />;
   }

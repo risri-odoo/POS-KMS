@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { groupColumns } from './board.js';
-import { propertyIdFromSearch } from './config.js';
+import { resolvePropertyId } from './config.js';
 import { Column } from './components/Column.js';
 import { Header } from './components/Header.js';
 import { PropertyForm } from './components/PropertyForm.js';
@@ -11,7 +11,7 @@ import { useKitchen } from './useKitchen.js';
 const CLOCK_TICK_MS = 30_000;
 
 export function App() {
-  const propertyId = propertyIdFromSearch(window.location.search);
+  const propertyId = resolvePropertyId(window.location.search, import.meta.env.VITE_DEFAULT_PROPERTY_ID);
   if (!propertyId) {
     return <PropertyForm initial={new URLSearchParams(window.location.search).get('propertyId') ?? ''} />;
   }

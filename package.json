@@ -2,20 +2,30 @@
   "name": "stayx-pos",
   "version": "0.1.0",
   "private": true,
-  "engines": { "node": ">=20.0.0", "pnpm": ">=9.0.0" },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  },
   "packageManager": "pnpm@9.15.4",
   "scripts": {
     "build": "pnpm -r run build",
     "dev": "pnpm --filter @stayx/api run dev",
     "dev:kms": "pnpm --filter @stayx/kms run dev",
     "dev:pos": "pnpm --filter @stayx/pos run dev",
+    "dev:all": "pnpm --parallel --filter @stayx/api --filter @stayx/kms --filter @stayx/pos run dev",
     "lint": "pnpm -r run lint",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
     "db:generate": "pnpm --filter @stayx/database run db:generate",
     "db:migrate": "pnpm --filter @stayx/database run db:migrate",
     "docker:up": "docker compose up -d",
-    "docker:down": "docker compose down"
+    "docker:down": "docker compose down",
+    "setup": "node scripts/setup.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs"
   },
-  "pnpm": { "overrides": { "@types/node": "^22.0.0" } }
+  "pnpm": {
+    "overrides": {
+      "@types/node": "^22.0.0"
+    }
+  }
 }

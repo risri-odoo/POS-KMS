@@ -17,3 +17,15 @@ export function propertyIdFromSearch(search: string): string | null {
   const value = new URLSearchParams(search).get('propertyId')?.trim() ?? null;
   return isUuid(value) ? value : null;
 }
+
+/**
+ * The property to show:
+ * - ?propertyId= present: use it if it's a UUID, otherwise null (show the entry form).
+ * - ?propertyId= absent: fall back to VITE_DEFAULT_PROPERTY_ID (set in .env.development
+ *   to the demo property) if it's a UUID, otherwise null.
+ */
+export function resolvePropertyId(search: string, fallback: string | undefined): string | null {
+  if (new URLSearchParams(search).has('propertyId')) return propertyIdFromSearch(search);
+  const value = fallback?.trim();
+  return isUuid(value) ? value : null;
+}
