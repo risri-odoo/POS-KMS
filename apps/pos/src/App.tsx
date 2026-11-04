@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
+import { AlertTriangle, ClipboardList, UtensilsCrossed } from 'lucide-react';
+import { AppShell, HeaderDate, type NavSection } from '@stayx/ui';
+import { version } from '../package.json';
 import { ApiError, listMenu, messageOf, placeOrder } from './api.js';
 import { cartReducer, cartSubtotal, emptyCart, unavailableLines } from './cart.js';
 import { resolvePropertyId } from './config.js';
 import { formatPrice, toMinor } from './money.js';
 import { sortMenu } from './menu.js';
-import { Header, type Tab } from './components/Header.js';
 import { MenuManager } from './components/MenuManager.js';
 import { NewOrder } from './components/NewOrder.js';
 import { Notice, type NoticeMessage } from './components/Notice.js';
@@ -20,8 +22,26 @@ export function App() {
   return <Pos propertyId={propertyId} />;
 }
 
+type Tab = 'order' | 'menu';
+
 function tabFromHash(): Tab {
   return window.location.hash === '#menu' ? 'menu' : 'order';
+}
+
+/** Plain hash links: the active tab lives in the URL, no router. */
+function navFor(tab: Tab): NavSection[] {
+  return [
+    {
+      items: [
+        { href: '#order', label: 'Orders', icon: ClipboardList, active: tab === 'order' },
+        { href: '#menu', label: 'Menu', icon: UtensilsCrossed, active: tab === 'menu' },
+      ],
+    },
+    {
+      title: 'Back office',
+      items: [{ href: '#outbox', label: 'Outbox/Errors', icon: AlertTriangle, disabled: true, hint: 'Soon' }],
+    },
+  ];
 }
 
 function Pos({ propertyId }: { propertyId: string }) {
@@ -125,13 +145,30 @@ function Pos({ propertyId }: { propertyId: string }) {
   }, [submitting, roomNumber, cart, orderNotes, propertyId, addPlaced, notify, refreshMenu]);
 
   return (
-    <div className="flex h-full flex-col">
-      <Header propertyId={propertyId} tab={tab} connection={connection} />
-      {connection === 'disconnected' && (
-        <div role="alert" className="bg-red-700 px-4 py-1 text-center text-lg font-semibold text-white">
-          Live updates disconnected. Reconnecting… Orders can still be placed.
-        </div>
-      )}
+    <AppShell
+      brand="StayX POS"
+      tagline="Room service"
+      nav={navFor(tab)}
+      connection={connection}
+      fill
+      mainClassName={`overflow-y-auto p-3 sm:p-4 lg:p-6 ${tab === 'order' ? 'lg:overflow-hidden' : ''}`}
+      footer={`v${version}`}
+      headerStart={
+        <>
+          <span className="rounded-lg border border-gray-200 px-3 py-1.5 font-mono text-sm text-telivity-slate" title={propertyId}>
+            {propertyId.slice(0, 8)}
+          </span>
+          <HeaderDate />
+        </>
+      }
+      banner={
+        connection === 'disconnected' && (
+          <div role="alert" className="border-b border-telivity-orange bg-telivity-orange/10 px-4 py-2 text-center text-sm font-semibold text-telivity-navy">
+            Live updates disconnected. Reconnecting… Orders can still be placed.
+          </div>
+        )
+      }
+    >
       <Notice notice={notice} onDismiss={() => setNotice(null)} />
 
       {tab === 'order' ? (
@@ -150,6 +187,6 @@ function Pos({ propertyId }: { propertyId: string }) {
       ) : (
         <MenuManager propertyId={propertyId} menu={menu} onMenuChange={onMenuChange} notify={notify} />
       )}
-    </div>
+    </AppShell>
   );
 }

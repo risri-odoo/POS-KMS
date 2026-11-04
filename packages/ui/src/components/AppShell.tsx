@@ -61,6 +61,13 @@ function ConnectionStatus({ state }: { state: ConnectionState }) {
   );
 }
 
+const TODAY_FORMAT = new Intl.DateTimeFormat('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+/** Today's date for the top bar, hidden on small screens as in HAIP. */
+export function HeaderDate() {
+  return <span className="hidden text-sm text-telivity-mid-grey md:inline">{TODAY_FORMAT.format(new Date())}</span>;
+}
+
 function NavLink({ item, onNavigate }: { item: NavItem; onNavigate: () => void }) {
   const { href, label, icon: Icon, active, disabled, hint } = item;
   if (disabled) {

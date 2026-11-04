@@ -1,10 +1,17 @@
 import type { HTMLAttributes, ReactNode, TdHTMLAttributes, ThHTMLAttributes } from 'react';
 
-export function Table({ className = '', children }: { className?: string; children: ReactNode }) {
+interface TableProps {
+  className?: string;
+  /** On the table itself, e.g. a min-width so narrow screens scroll sideways. */
+  tableClassName?: string;
+  children: ReactNode;
+}
+
+export function Table({ className = '', tableClassName = '', children }: TableProps) {
   return (
     <div className={`overflow-hidden rounded-xl bg-white shadow-sm ${className}`}>
       <div className="overflow-x-auto">
-        <table className="w-full">{children}</table>
+        <table className={`w-full ${tableClassName}`}>{children}</table>
       </div>
     </div>
   );

@@ -1,7 +1,25 @@
 import { useEffect, useMemo, useState, type Dispatch } from 'react';
+import { ClipboardList, Minus, Plus } from 'lucide-react';
+import {
+  Button,
+  Card,
+  EmptyState,
+  Field,
+  Input,
+  OrderStatusBadge,
+  PageHeader,
+  Spinner,
+  Table,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+  Textarea,
+} from '@stayx/ui';
 import { MAX_QUANTITY, MIN_QUANTITY, cartSubtotal, type CartAction, type CartState } from '../cart.js';
 import { formatMoney, formatPrice } from '../money.js';
-import { STATUS_BADGE, STATUS_LABEL, formatAge, groupAvailableMenu } from '../menu.js';
+import { formatAge, groupAvailableMenu } from '../menu.js';
 import type { FeedOrder, MenuItem } from '../types.js';
 
 const CLOCK_TICK_MS = 30_000;
@@ -21,41 +39,56 @@ interface Props {
 
 export function NewOrder(props: Props) {
   return (
-    <div className="grid min-h-0 flex-1 gap-3 p-3 lg:grid-cols-[minmax(0,1fr)_26rem]">
-      <section className="flex min-h-0 flex-col gap-3 overflow-y-auto" aria-label="Menu">
-        <MenuTiles menu={props.menu} onAdd={(item) => props.dispatchCart({ type: 'add', item })} />
-        <RecentOrders orders={props.recent} />
-      </section>
-      <CartPanel {...props} />
-    </div>
+    <>
+      <PageHeader title="New order" icon={ClipboardList} className="mb-4!" />
+      <div className="grid flex-1 grid-cols-[minmax(0,1fr)] gap-4 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
+        <section className="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto" aria-label="Menu">
+          <MenuTiles menu={props.menu} onAdd={(item) => props.dispatchCart({ type: 'add', item })} />
+          <RecentOrders orders={props.recent} />
+        </section>
+        <CartPanel {...props} />
+      </div>
+    </>
   );
 }
 
 function MenuTiles({ menu, onAdd }: { menu: MenuItem[] | null; onAdd: (item: MenuItem) => void }) {
   const groups = useMemo(() => groupAvailableMenu(menu ?? []), [menu]);
-  if (menu === null) return <p className="p-4 text-lg text-neutral-400">Loading menu…</p>;
+  if (menu === null) {
+    return (
+      <p className="flex items-center gap-2 p-4 text-sm text-telivity-slate">
+        <Spinner /> Loading menu…
+      </p>
+    );
+  }
   if (groups.length === 0) {
     return (
-      <p className="rounded-xl bg-neutral-900 p-6 text-lg text-neutral-400">
-        No available menu items. Add some on the <a href="#menu" className="text-emerald-400 underline">Menu</a> tab.
-      </p>
+      <Card padding="none">
+        <EmptyState>
+          No available menu items. Add some on the{' '}
+          <a href="#menu" className="text-telivity-teal underline">
+            Menu
+          </a>{' '}
+          tab.
+        </EmptyState>
+      </Card>
     );
   }
   return (
     <>
       {groups.map((group) => (
         <div key={group.category}>
-          <h2 className="mb-2 text-xl font-bold text-neutral-300">{group.category}</h2>
+          <h2 className="mb-2 text-sm font-semibold text-telivity-navy">{group.category}</h2>
           <div className="grid grid-cols-[repeat(auto-fill,minmax(10rem,1fr))] gap-2">
             {group.items.map((item) => (
               <button
                 key={item.id}
                 type="button"
                 onClick={() => onAdd(item)}
-                className="flex min-h-24 flex-col justify-between rounded-xl border border-neutral-700 bg-neutral-900 p-3 text-left active:bg-neutral-800"
+                className="flex min-h-24 flex-col justify-between rounded-xl border border-transparent bg-white p-3 text-left shadow-sm transition-colors hover:border-telivity-teal active:bg-telivity-teal/5"
               >
-                <span className="text-lg font-semibold leading-tight">{item.name}</span>
-                <span className="text-lg tabular-nums text-emerald-300">{formatPrice(item.price, item.currencyCode)}</span>
+                <span className="text-sm leading-tight font-semibold text-telivity-navy">{item.name}</span>
+                <span className="text-sm text-telivity-slate tabular-nums">{formatPrice(item.price, item.currencyCode)}</span>
               </button>
             ))}
           </div>
@@ -81,100 +114,90 @@ function CartPanel({
   const canPlace = cart.lines.length > 0 && roomNumber.trim() !== '' && subtotal.kind !== 'mixed' && !submitting;
 
   return (
-    <aside className="flex min-h-0 flex-col gap-3 rounded-xl bg-neutral-900 p-4" aria-label="Cart">
-      <h2 className="text-2xl font-bold">Order</h2>
+    <aside className="flex flex-col gap-3 rounded-xl bg-white p-4 shadow-sm lg:min-h-0" aria-label="Cart">
+      <h2 className="text-lg font-semibold text-telivity-navy">Order</h2>
 
-      <label className="flex flex-col gap-1 text-lg">
-        <span className="text-neutral-300">Room number *</span>
-        <input
-          value={roomNumber}
-          onChange={(e) => onRoomNumber(e.target.value)}
-          maxLength={20}
-          inputMode="text"
-          autoComplete="off"
-          className="min-h-12 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-2xl font-bold"
-        />
-      </label>
+      <Field label="Room number *">
+        {(id) => (
+          <Input
+            id={id}
+            value={roomNumber}
+            onChange={(e) => onRoomNumber(e.target.value)}
+            maxLength={20}
+            inputMode="text"
+            autoComplete="off"
+            className="min-h-11 text-lg! font-semibold"
+          />
+        )}
+      </Field>
 
-      <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-        {cart.lines.length === 0 && <li className="py-6 text-center text-lg text-neutral-500">Tap menu items to add them.</li>}
+      <ul className="flex flex-col gap-2 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
+        {cart.lines.length === 0 && <li className="py-6 text-center text-sm text-telivity-mid-grey">Tap menu items to add them.</li>}
         {cart.lines.map((line) => (
-          <li key={line.menuItemId} className="flex flex-col gap-2 rounded-lg bg-neutral-800 p-2">
+          <li key={line.menuItemId} className="flex flex-col gap-2 rounded-lg border border-gray-100 bg-gray-50 p-3">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-lg font-semibold">{line.name}</span>
-              <span className="tabular-nums text-neutral-300">{formatPrice(line.unitPrice, line.currencyCode)}</span>
+              <span className="text-sm font-semibold text-telivity-navy">{line.name}</span>
+              <span className="text-sm text-telivity-slate tabular-nums">{formatPrice(line.unitPrice, line.currencyCode)}</span>
             </div>
             <div className="flex items-center gap-2">
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 aria-label={`One less ${line.name}`}
                 disabled={line.quantity <= MIN_QUANTITY}
                 onClick={() => dispatchCart({ type: 'setQuantity', menuItemId: line.menuItemId, quantity: line.quantity - 1 })}
-                className="min-h-12 min-w-12 rounded-lg bg-neutral-700 text-2xl font-bold disabled:opacity-40"
+                className="min-h-11 min-w-11 px-0!"
               >
-                −
-              </button>
-              <span className="min-w-10 text-center text-2xl font-bold tabular-nums" aria-live="polite">
+                <Minus size={18} aria-hidden="true" />
+              </Button>
+              <span className="min-w-8 text-center text-lg font-semibold text-telivity-navy tabular-nums" aria-live="polite">
                 {line.quantity}
               </span>
-              <button
-                type="button"
+              <Button
+                variant="secondary"
                 aria-label={`One more ${line.name}`}
                 disabled={line.quantity >= MAX_QUANTITY}
                 onClick={() => dispatchCart({ type: 'setQuantity', menuItemId: line.menuItemId, quantity: line.quantity + 1 })}
-                className="min-h-12 min-w-12 rounded-lg bg-neutral-700 text-2xl font-bold disabled:opacity-40"
+                className="min-h-11 min-w-11 px-0!"
               >
-                +
-              </button>
-              <button
-                type="button"
+                <Plus size={18} aria-hidden="true" />
+              </Button>
+              <Button
+                variant="ghost"
                 onClick={() => dispatchCart({ type: 'remove', menuItemId: line.menuItemId })}
-                className="ml-auto min-h-12 rounded-lg px-3 text-lg font-semibold text-red-300 hover:bg-neutral-700"
+                className="ml-auto min-h-11 text-red-600! hover:bg-red-50!"
               >
                 Remove
-              </button>
+              </Button>
             </div>
-            <input
+            <Input
               value={line.note}
               onChange={(e) => dispatchCart({ type: 'setNote', menuItemId: line.menuItemId, note: e.target.value })}
               maxLength={500}
               placeholder="Note (e.g. no onions)"
               aria-label={`Note for ${line.name}`}
-              className="min-h-12 rounded-lg border border-neutral-700 bg-neutral-950 px-3 text-base"
+              className="min-h-11"
             />
           </li>
         ))}
       </ul>
 
-      <label className="flex flex-col gap-1 text-lg">
-        <span className="text-neutral-300">Order notes</span>
-        <textarea
-          value={orderNotes}
-          onChange={(e) => onOrderNotes(e.target.value)}
-          maxLength={1000}
-          rows={2}
-          className="rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-base"
-        />
-      </label>
+      <Field label="Order notes">
+        {(id) => <Textarea id={id} value={orderNotes} onChange={(e) => onOrderNotes(e.target.value)} maxLength={1000} rows={2} />}
+      </Field>
 
-      <div className="flex items-baseline justify-between text-xl">
-        <span className="text-neutral-300">Subtotal</span>
-        <span className="font-bold tabular-nums">
+      <div className="flex items-baseline justify-between">
+        <span className="text-sm text-telivity-slate">Subtotal</span>
+        <span className="text-lg font-semibold text-telivity-navy tabular-nums">
           {subtotal.kind === 'ok' && formatMoney(subtotal.minor, subtotal.currencyCode)}
           {subtotal.kind === 'empty' && '—'}
-          {subtotal.kind === 'mixed' && <span className="text-amber-400">Mixed currencies</span>}
+          {subtotal.kind === 'mixed' && <span className="text-telivity-orange">Mixed currencies</span>}
         </span>
       </div>
-      <p className="-mt-2 text-sm text-neutral-500">Estimate. The server prices the order from the current menu.</p>
+      <p className="-mt-2 text-xs text-gray-500">Estimate. The server prices the order from the current menu.</p>
 
-      <button
-        type="button"
-        disabled={!canPlace}
-        onClick={onPlaceOrder}
-        className="min-h-16 rounded-xl bg-emerald-600 text-2xl font-bold text-white active:bg-emerald-700 disabled:opacity-40"
-      >
+      <Button disabled={!canPlace} onClick={onPlaceOrder} className="min-h-12 w-full text-base!">
         {submitting ? 'Placing…' : 'Place order'}
-      </button>
+      </Button>
     </aside>
   );
 }
@@ -188,24 +211,34 @@ function RecentOrders({ orders }: { orders: FeedOrder[] }) {
 
   return (
     <div className="mt-2">
-      <h2 className="mb-2 text-xl font-bold text-neutral-300">Recent orders</h2>
-      {orders.length === 0 ? (
-        <p className="text-lg text-neutral-500">No orders yet.</p>
-      ) : (
-        <ul className="flex flex-col gap-1">
+      <h2 className="mb-2 text-sm font-semibold text-telivity-navy">Recent orders</h2>
+      <Table tableClassName="min-w-[30rem]">
+        <TableHead>
+          <TableHeader>Status</TableHeader>
+          <TableHeader>Room</TableHeader>
+          <TableHeader>Order</TableHeader>
+          <TableHeader align="right">Total</TableHeader>
+          <TableHeader align="right">Placed</TableHeader>
+        </TableHead>
+        <tbody>
+          {orders.length === 0 && <TableEmpty colSpan={5}>No orders yet.</TableEmpty>}
           {orders.map((o) => (
-            <li key={o.id} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-3 rounded-lg bg-neutral-900 px-3 py-2 text-lg">
-              <span className={`rounded-md px-2 py-0.5 text-sm font-bold ${STATUS_BADGE[o.status]}`}>{STATUS_LABEL[o.status]}</span>
-              <span>
-                <span className="font-bold">Room {o.roomNumber}</span>
-                <span className="ml-2 font-mono text-sm text-neutral-400">{o.orderNumber}</span>
-              </span>
-              <span className="tabular-nums">{formatPrice(o.subtotal, o.currencyCode)}</span>
-              <span className="min-w-20 text-right text-sm text-neutral-400 tabular-nums">{formatAge(o.createdAt, now)}</span>
-            </li>
+            <TableRow key={o.id}>
+              <TableCell>
+                <OrderStatusBadge status={o.status} />
+              </TableCell>
+              <TableCell strong>{o.roomNumber}</TableCell>
+              <TableCell className="font-mono text-xs!">{o.orderNumber}</TableCell>
+              <TableCell align="right" className="tabular-nums">
+                {formatPrice(o.subtotal, o.currencyCode)}
+              </TableCell>
+              <TableCell align="right" className="tabular-nums">
+                {formatAge(o.createdAt, now)}
+              </TableCell>
+            </TableRow>
           ))}
-        </ul>
-      )}
+        </tbody>
+      </Table>
     </div>
   );
 }

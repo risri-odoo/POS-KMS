@@ -29,9 +29,16 @@ const BAR_COLORS = {
   info: 'bg-telivity-deep-blue',
 };
 
-export function ToastStack({ children }: { children: ReactNode }) {
+interface ToastStackProps {
+  /** HAIP uses bottom. Use top where sticky messages would cover bottom-right actions. */
+  position?: 'bottom' | 'top';
+  children: ReactNode;
+}
+
+export function ToastStack({ position = 'bottom', children }: ToastStackProps) {
+  const place = position === 'top' ? 'top-16' : 'bottom-4';
   return (
-    <div className="fixed right-4 bottom-4 z-[60] flex max-w-sm flex-col gap-2" role="log" aria-live="polite">
+    <div className={`fixed left-4 z-[60] flex flex-col gap-2 sm:left-auto sm:max-w-sm right-4 ${place}`} role="log" aria-live="polite">
       {children}
     </div>
   );
@@ -104,8 +111,8 @@ export function ToastView({ type, message, onDismiss, sticky = false }: ToastVie
     >
       <Icon size={18} className={`mt-0.5 flex-shrink-0 ${ICON_COLORS[type]}`} aria-hidden="true" />
       <p className="flex-1 text-sm text-telivity-navy">{message}</p>
-      <button type="button" onClick={onDismiss} className="-m-1 rounded-sm p-1 hover:bg-black/5" aria-label="Dismiss message">
-        <X size={14} className="text-telivity-mid-grey" aria-hidden="true" />
+      <button type="button" onClick={onDismiss} className="-m-2 rounded-lg p-2 hover:bg-black/5" aria-label="Dismiss message">
+        <X size={16} className="text-telivity-slate" aria-hidden="true" />
       </button>
       {!sticky && (
         <div

@@ -1,4 +1,4 @@
-export { AppShell, type ConnectionState, type NavItem, type NavSection } from './components/AppShell.js';
+export { AppShell, HeaderDate, type ConnectionState, type NavItem, type NavSection } from './components/AppShell.js';
 export { Badge, OrderStatusBadge } from './components/Badge.js';
 export { Button } from './components/Button.js';
 export { Card, CardTitle } from './components/Card.js';
