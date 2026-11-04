@@ -6,6 +6,7 @@ import { buildInboundCharge } from './charge-mapper.js';
 import { HaipClient } from './haip-client.js';
 import { HAIP_CONFIG, type HaipConfig } from './haip.config.js';
 import { HAIP_JOB_ATTEMPTS, backoffDelayMs, type HaipJobData } from './haip-queue.service.js';
+import { NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError } from './no-in-house-guard.js';
 
 export const HAIP_CLIENT = Symbol('HAIP_CLIENT');
 
@@ -47,6 +48,14 @@ export class OutboxProcessor {
     // Idempotent: posted, resolved or parked rows are never sent again.
     if (!row || row.status !== 'pending') return 'skipped';
 
+    // Belt and braces: retry and the sweeper already exclude these rows, but a
+    // row put back to pending by hand must still never be re-sent.
+    if (isNoInHouseGuestError(row.lastError)) {
+      await this.finish(row, { status: 'needs_attention', nextRetryAt: null });
+      this.logger.warn(`Not re-posting ${row.vendorTxnId}: room had no in-house guest`);
+      return 'needs_attention';
+    }
+
     if (!this.config.propertyId || row.propertyId !== this.config.propertyId) {
       await this.finish(row, { status: 'needs_attention', lastError: WRONG_PROPERTY_ERROR });
       return 'needs_attention';
@@ -84,11 +93,13 @@ export class OutboxProcessor {
 
       case 'rejected':
         // A human must fix it (room not in-house, validation, bad key). HAIP
-        // rolled back, so a later manual retry is safe.
+        // rolled back, so a later manual retry is safe, except when the room had
+        // no in-house guest: that row is resolve-only (see no-in-house-guard.ts).
+        const rejection = `HAIP rejected (${result.status}): ${result.message}`;
         await this.finish(row, {
           status: 'needs_attention',
           attempts,
-          lastError: `HAIP rejected (${result.status}): ${result.message}`,
+          lastError: isNoInHouseGuestError(result.message) ? `${NO_IN_HOUSE_GUEST_PREFIX}. ${rejection}` : rejection,
           nextRetryAt: null,
         });
         this.logger.warn(`HAIP rejected ${row.vendorTxnId}: ${result.message}`);

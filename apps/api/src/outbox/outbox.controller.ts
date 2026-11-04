@@ -19,12 +19,15 @@ export class OutboxController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Re-send a needs_attention or failed post to HAIP',
-    description: 'For a FAILED row, check the guest folio in HAIP first: the charge may already be posted.',
+    description:
+      'For a FAILED row, check the guest folio in HAIP first: the charge may already be posted. ' +
+      'Rows parked because the room had no in-house guest cannot be retried (409); post them in HAIP and resolve.',
   })
   @ApiQuery({ name: 'propertyId', type: String, required: true })
   @ApiResponse({ status: 200, description: 'The row, back to pending and queued' })
   @ApiResponse({ status: 400, description: 'Row is not needs_attention or failed' })
   @ApiResponse({ status: 404, description: 'Not found in this property' })
+  @ApiResponse({ status: 409, description: 'Parked because the room had no in-house guest: resolve only' })
   retry(@Param('id', ParseUUIDPipe) id: string, @Query('propertyId', ParseUUIDPipe) propertyId: string) {
     return this.outboxService.retry(id, propertyId);
   }

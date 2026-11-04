@@ -1,8 +1,9 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, inArray, type SQL } from 'drizzle-orm';
 import { haipPostOutbox } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { HaipQueue } from '../haip/haip-queue.service.js';
+import { isNoInHouseGuestError, repostAllowed } from '../haip/no-in-house-guard.js';
 import type { ListOutboxDto } from './dto/outbox.dto.js';
 
 export type OutboxRow = typeof haipPostOutbox.$inferSelect;
@@ -29,14 +30,17 @@ export class OutboxService {
       .orderBy(desc(haipPostOutbox.createdAt));
   }
 
-  /** Send it to HAIP again. Safe for HAIP (same vendorTxnId), but see the failed-row warning. */
+  /**
+   * Send it to HAIP again. Safe for HAIP (same vendorTxnId), but see the failed-row warning.
+   * Refused for rows parked because the room had no in-house guest: those are resolve-only.
+   */
   async retry(id: string, propertyId: string): Promise<OutboxRow> {
-    const row = await this.transitionActionable(id, propertyId, {
-      status: 'pending',
-      attempts: 0,
-      lastError: null,
-      nextRetryAt: null,
-    });
+    const row = await this.transitionActionable(
+      id,
+      propertyId,
+      { status: 'pending', attempts: 0, lastError: null, nextRetryAt: null },
+      repostAllowed(),
+    );
     await this.haipQueue.enqueue(row.id).catch((error: unknown) => {
       this.logger.warn(`Could not queue retry for ${row.id} (sweeper will pick it up): ${(error as Error)?.message ?? error}`);
     });
@@ -53,8 +57,13 @@ export class OutboxService {
     });
   }
 
-  /** Atomic: the WHERE requires an actionable status, so it can't race the worker. */
-  private async transitionActionable(id: string, propertyId: string, changes: Partial<OutboxRow>): Promise<OutboxRow> {
+  /** Atomic: the WHERE requires an actionable status (and `guard`), so it can't race the worker. */
+  private async transitionActionable(
+    id: string,
+    propertyId: string,
+    changes: Partial<OutboxRow>,
+    guard?: SQL,
+  ): Promise<OutboxRow> {
     const [row] = await this.db
       .update(haipPostOutbox)
       .set({ ...changes, updatedAt: new Date() })
@@ -63,16 +72,23 @@ export class OutboxService {
           eq(haipPostOutbox.id, id),
           eq(haipPostOutbox.propertyId, propertyId),
           inArray(haipPostOutbox.status, [...ACTIONABLE]),
+          guard,
         ),
       )
       .returning();
     if (row) return row;
 
     const [existing] = await this.db
-      .select({ status: haipPostOutbox.status })
+      .select({ status: haipPostOutbox.status, lastError: haipPostOutbox.lastError })
       .from(haipPostOutbox)
       .where(and(eq(haipPostOutbox.id, id), eq(haipPostOutbox.propertyId, propertyId)));
     if (!existing) throw new NotFoundException(`Outbox entry ${id} not found`);
+    if (guard && ACTIONABLE.some((s) => s === existing.status) && isNoInHouseGuestError(existing.lastError)) {
+      throw new ConflictException(
+        'This charge was parked because the room had no in-house guest. Re-sending it could charge whoever is in ' +
+          'the room now, so it cannot be retried. Post it to the right guest folio in HAIP, then resolve it here.',
+      );
+    }
     throw new BadRequestException(
       `Outbox entry is ${existing.status}; only needs_attention or failed entries can be retried or resolved`,
     );

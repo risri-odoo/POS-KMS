@@ -5,6 +5,7 @@ import { haipPostOutbox } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { HAIP_CONFIG, redisConnectionOptions, type HaipConfig } from './haip.config.js';
 import { HAIP_QUEUE_NAME, HaipQueue, type HaipJobData } from './haip-queue.service.js';
+import { repostAllowed } from './no-in-house-guard.js';
 import { OutboxProcessor } from './outbox.processor.js';
 import { throttledLog } from './throttled-log.js';
 
@@ -69,6 +70,7 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
           and(
             eq(haipPostOutbox.status, 'pending'),
             or(isNull(haipPostOutbox.nextRetryAt), lte(haipPostOutbox.nextRetryAt, new Date())),
+            repostAllowed(),
           ),
         )
         .orderBy(asc(haipPostOutbox.createdAt))

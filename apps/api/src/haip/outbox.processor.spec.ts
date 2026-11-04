@@ -5,6 +5,7 @@ import { HaipRetryableError, MAY_BE_POSTED_PREFIX, OutboxProcessor, WRONG_PROPER
 import type { HaipClient, HaipPostResult } from './haip-client.js';
 import type { HaipConfig } from './haip.config.js';
 import type { Db } from '../database/database.module.js';
+import { HAIP_NO_IN_HOUSE_TEXT, NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError } from './no-in-house-guard.js';
 
 const PROPERTY_ID = '11111111-1111-4111-8111-111111111111';
 const ORDER_ID = '33333333-3333-4333-8333-333333333333';
@@ -114,6 +115,33 @@ describe('OutboxProcessor', () => {
 
     await expect(processor.process(job())).resolves.toBe('needs_attention');
     expect(updates[0]).toMatchObject({ status: 'needs_attention', attempts: 1, lastError: 'HAIP rejected (400): HTTP 400: Room 999 is vacant' });
+  });
+
+  it('400 "no in-house reservation" → needs_attention marked as do-not-re-post', async () => {
+    postCharge.mockResolvedValue({
+      kind: 'rejected',
+      status: 400,
+      message: `HTTP 400: Room 110 ${HAIP_NO_IN_HOUSE_TEXT}`,
+    });
+    const { processor, updates } = make(outboxRow());
+
+    await expect(processor.process(job())).resolves.toBe('needs_attention');
+    expect(updates[0]).toMatchObject({
+      status: 'needs_attention',
+      attempts: 1,
+      lastError: `${NO_IN_HOUSE_GUEST_PREFIX}. HAIP rejected (400): HTTP 400: Room 110 ${HAIP_NO_IN_HOUSE_TEXT}`,
+    });
+    expect(isNoInHouseGuestError(updates[0]!['lastError'] as string)).toBe(true);
+  });
+
+  it('a pending row already parked for no in-house guest is never sent (e.g. reset by hand)', async () => {
+    const { processor, updates } = make(
+      outboxRow({ lastError: `HAIP rejected (400): HTTP 400: Room 110 ${HAIP_NO_IN_HOUSE_TEXT}` }),
+    );
+
+    await expect(processor.process(job())).resolves.toBe('needs_attention');
+    expect(postCharge).not.toHaveBeenCalled();
+    expect(updates).toEqual([{ status: 'needs_attention', nextRetryAt: null, updatedAt: expect.any(Date) }]);
   });
 
   it('500 on a non-final attempt → records the error and nextRetryAt, then throws for BullMQ to back off', async () => {
