@@ -32,16 +32,16 @@ pnpm seed:demo      # adds a demo menu (safe to run again)
 
 | What | URL |
 |---|---|
-| POS (take orders, edit the menu) | http://localhost:5174 |
-| Kitchen display | http://localhost:5173 |
+| POS (take orders, edit the menu) | http://localhost:5180 |
+| Kitchen display | http://localhost:5181 |
 | API docs (Swagger) | http://localhost:4000/docs |
 
 Both screens open the demo hotel (`a0000001-0000-4000-a000-000000000001`) automatically. To use another property, add `?propertyId=<uuid>` to the URL.
 
 ## 2-minute tour
 
-1. **Kitchen screen** (http://localhost:5173): click **Enable sound** in the top right. Browsers only allow sound after you click something.
-2. **POS** (http://localhost:5174), **New order** tab: tap a few menu tiles, enter a room number (e.g. `1204`), optionally add a note, and press **Place order**. You'll see the order number.
+1. **Kitchen screen** (http://localhost:5181): click **Enable sound** in the top right. Browsers only allow sound after you click something.
+2. **POS** (http://localhost:5180), **Orders** page: tap a few menu tiles, enter a room number (e.g. `1204`), optionally add a note, and press **Place order**. You'll see the order number.
 3. Look at the kitchen screen: the order appears in **Placed** with a beep.
 4. On the kitchen screen press **Accept → Start preparing → Mark ready → Mark delivered**. Watch **Recent orders** on the POS update live.
 5. POS → **Menu** tab: press **Edit** on an item, change its price, **Save**. New orders use the new price; existing orders keep theirs.
@@ -56,13 +56,13 @@ Both screens open the demo hotel (`a0000001-0000-4000-a000-000000000001`) automa
 ## Troubleshooting
 
 - **"Docker is not running" / `pnpm run setup` fails at the start:** open Docker Desktop and wait until it says it's running, then try again.
-- **"Port … is already in use" / `EADDRINUSE`:** this demo uses ports **4000** (API), **5173** (kitchen), **5174** (POS), **5433** (Postgres) and **6380** (Redis). Close whatever is using them, or stop an older copy of this demo (`pnpm docker:down` in that folder).
-  - Windows: `netstat -ano | findstr :5174` shows the process id; end it in Task Manager.
-  - macOS/Linux: `lsof -i :5174`.
+- **"Port … is already in use" / `EADDRINUSE`:** this demo uses ports **4000** (API), **5181** (kitchen), **5180** (POS), **5433** (Postgres) and **6380** (Redis). Close whatever is using them, or stop an older copy of this demo (`pnpm docker:down` in that folder).
+  - Windows: `netstat -ano | findstr :5180` shows the process id; end it in Task Manager.
+  - macOS/Linux: `lsof -i :5180`.
 - **Screens show "Disconnected" or "Cannot reach the POS server":** the API isn't running. Check the `pnpm dev:all` terminal for errors.
 - **`pnpm seed:demo` says it can't reach the API:** start `pnpm dev:all` first and wait for `Nest application successfully started`.
 - **API log says `HAIP bridge DISABLED`:** that's expected. Posting to the hotel system is off unless you configure it (see below).
-- **Using a tablet on the same Wi-Fi:** the screens listen on your network address, but they call the API at `localhost`, which only works on the computer running it. Create `.env.local` files in `apps/pos` and `apps/kms` with `VITE_API_URL=http://<your-computer-ip>:4000/api/v1`, and set `CORS_ORIGINS` in a root `.env` (see `.env.example`) to include `http://<your-computer-ip>:5173` and `:5174`.
+- **Using a tablet on the same Wi-Fi:** the screens listen on your network address, but they call the API at `localhost`, which only works on the computer running it. Create `.env.local` files in `apps/pos` and `apps/kms` with `VITE_API_URL=http://<your-computer-ip>:4000/api/v1`, and set `CORS_ORIGINS` in a root `.env` (see `.env.example`) to include `http://<your-computer-ip>:5181` and `:5180`.
 
 ## How it's built
 
