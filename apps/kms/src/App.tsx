@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Volume2, VolumeX, X } from 'lucide-react';
+import { AppShell, Button, HeaderDate } from '@stayx/ui';
 import { groupColumns } from './board.js';
 import { resolvePropertyId } from './config.js';
 import { Column } from './components/Column.js';
-import { Header } from './components/Header.js';
 import { PropertyForm } from './components/PropertyForm.js';
+import { shortId } from './kitchen.js';
 import { beep, loadSoundPreference, saveSoundPreference, unlockAudio } from './sound.js';
 import { ACTIVE_STATUSES, type OrderWithItems } from './types.js';
 import { useKitchen } from './useKitchen.js';
@@ -63,31 +65,57 @@ function KitchenBoard({ propertyId }: { propertyId: string }) {
   const columns = useMemo(() => groupColumns(board), [board]);
 
   return (
-    <div className="flex h-full flex-col">
-      <Header
-        propertyId={propertyId}
-        connection={connection}
-        soundEnabled={soundEnabled}
-        audioReady={audioReady}
-        onToggleSound={toggleSound}
-      />
+    <AppShell
+      brand="StayX Kitchen"
+      connection={connection}
+      largeConnection
+      fill
+      mainClassName="p-3"
+      headerStart={
+        <>
+          <span className="rounded-lg border border-gray-200 px-3 py-1.5 font-mono text-sm text-telivity-slate" title={propertyId}>
+            {shortId(propertyId)}
+          </span>
+          <HeaderDate />
+        </>
+      }
+      headerEnd={
+        <Button
+          variant={soundEnabled ? 'primary' : 'secondary'}
+          highContrast
+          icon={soundEnabled ? Volume2 : VolumeX}
+          onClick={toggleSound}
+          aria-pressed={soundEnabled}
+          className="min-h-12 text-base!"
+        >
+          {soundEnabled ? (audioReady ? 'Sound on' : 'Sound on (tap anywhere)') : 'Enable sound'}
+        </Button>
+      }
+      banner={
+        <>
+          {connection !== 'connected' && (
+            <div role="alert" className="bg-telivity-orange px-4 py-2 text-center text-xl font-semibold text-telivity-navy">
+              {connection === 'connecting' ? 'Connecting to kitchen server…' : 'Disconnected — reconnecting. Board may be out of date.'}
+            </div>
+          )}
 
-      {connection !== 'connected' && (
-        <div role="alert" className="bg-red-700 px-4 py-2 text-center text-xl font-semibold text-white">
-          {connection === 'connecting' ? 'Connecting to kitchen server…' : 'Disconnected — reconnecting. Board may be out of date.'}
-        </div>
-      )}
-
-      {message && (
-        <div role="status" className="flex items-center justify-between gap-4 bg-amber-500 px-4 py-1 text-lg font-semibold text-neutral-950">
-          <span>{message}</span>
-          <button type="button" onClick={dismissMessage} className="min-h-12 min-w-12 rounded-lg px-3 font-bold" aria-label="Dismiss message">
-            ✕
-          </button>
-        </div>
-      )}
-
-      <main className="grid min-h-0 flex-1 grid-cols-4 gap-3 overflow-x-auto p-3">
+          {message && (
+            <div role="status" className="flex items-center justify-between gap-4 border-b border-telivity-orange bg-telivity-yellow/25 px-4 py-1 text-lg font-semibold text-telivity-navy">
+              <span>{message}</span>
+              <button
+                type="button"
+                onClick={dismissMessage}
+                className="flex min-h-12 min-w-12 items-center justify-center rounded-lg hover:bg-black/5"
+                aria-label="Dismiss message"
+              >
+                <X size={22} aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </>
+      }
+    >
+      <div className="grid min-h-0 flex-1 grid-cols-[repeat(4,minmax(14.5rem,1fr))] grid-rows-[minmax(0,1fr)] gap-3 overflow-x-auto">
         {ACTIVE_STATUSES.map((status) => (
           <Column
             key={status}
@@ -98,7 +126,7 @@ function KitchenBoard({ propertyId }: { propertyId: string }) {
             onChangeStatus={changeStatus}
           />
         ))}
-      </main>
-    </div>
+      </div>
+    </AppShell>
   );
 }

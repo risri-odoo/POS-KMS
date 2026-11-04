@@ -20,8 +20,8 @@ export const COLUMN_TITLES: Record<ActiveStatus, string> = {
   ready: 'Ready',
 };
 
-export const AMBER_AFTER_MINUTES = 10;
-export const RED_AFTER_MINUTES = 20;
+/** Minutes before a ticket warns. Change them here. "amber" shows in HAIP's orange. */
+export const AGE_THRESHOLD_MINUTES = { amber: 10, red: 20 } as const;
 
 export type AgeTone = 'normal' | 'amber' | 'red';
 
@@ -33,8 +33,8 @@ export function minutesSince(createdAt: string, now: number): number {
 }
 
 export function ageTone(minutes: number): AgeTone {
-  if (minutes >= RED_AFTER_MINUTES) return 'red';
-  if (minutes >= AMBER_AFTER_MINUTES) return 'amber';
+  if (minutes >= AGE_THRESHOLD_MINUTES.red) return 'red';
+  if (minutes >= AGE_THRESHOLD_MINUTES.amber) return 'amber';
   return 'normal';
 }
 

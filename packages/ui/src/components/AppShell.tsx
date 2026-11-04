@@ -29,6 +29,8 @@ interface AppShellProps {
   /** Leave out for a top-bar-only layout, such as the kitchen display. */
   nav?: NavSection[];
   connection?: ConnectionState;
+  /** Bigger Live/Offline status, readable from across a kitchen. */
+  largeConnection?: boolean;
   headerStart?: ReactNode;
   headerEnd?: ReactNode;
   /** Full-width alerts between the top bar and the page. */
@@ -52,11 +54,11 @@ const CONNECTION_DOT: Record<ConnectionState, string> = {
   disconnected: 'bg-telivity-orange',
 };
 
-function ConnectionStatus({ state }: { state: ConnectionState }) {
+function ConnectionStatus({ state, large }: { state: ConnectionState; large: boolean }) {
   return (
     <div className="flex items-center gap-1.5" aria-live="polite">
-      <div className={`h-2 w-2 rounded-full ${CONNECTION_DOT[state]}`} aria-hidden="true" />
-      <span className="text-xs text-telivity-slate">{CONNECTION_LABEL[state]}</span>
+      <div className={`rounded-full ${large ? 'h-3 w-3' : 'h-2 w-2'} ${CONNECTION_DOT[state]}`} aria-hidden="true" />
+      <span className={`text-telivity-slate ${large ? 'text-base font-semibold' : 'text-xs'}`}>{CONNECTION_LABEL[state]}</span>
     </div>
   );
 }
@@ -99,6 +101,7 @@ export function AppShell({
   tagline,
   nav,
   connection,
+  largeConnection = false,
   headerStart,
   headerEnd,
   banner,
@@ -164,7 +167,7 @@ export function AppShell({
             {headerStart}
           </div>
           <div className="flex items-center gap-3 sm:gap-4">
-            {connection && <ConnectionStatus state={connection} />}
+            {connection && <ConnectionStatus state={connection} large={largeConnection} />}
             {headerEnd}
           </div>
         </header>
