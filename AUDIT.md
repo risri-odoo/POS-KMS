@@ -1,21 +1,22 @@
 # StayX POS + KMS — Audit against the HSM + POS + KMS spec
 
-Audited: `pos/` at commit `a748f97` (clean tree), 2026-10-25. HAIP read at `cb8d140` (clean tree), read-only.
+Originally audited: `pos/` at commit `a748f97`, 2026-10-25. HAIP read at `cb8d140`, read-only.
+Last updated 2026-11-05: `pos/` `main` after UI merge `9c6e07b`, HAIP at `928c2f6` (§11). §9 and §10 are dated run records and keep the versions they ran on.
 Spec: `../HSM+POS+KMS.pdf` (the brief said `./docs/HSM_POS_KMS.pdf`; no `docs/` folder exists).
-Method: code reading with `file:line` evidence. Nothing was run, migrated, installed or started for this audit.
-"Verified" below means "read in code". Things only observable at runtime are marked **Can't verify**.
+Method: code reading with `file:line` evidence. Nothing was run, migrated, installed or started for the original audit.
+"Verified" below means "read in code", unless it points to the live runs in §9 and §10.
 
 ---
 
 ## Summary
 
-- **The order pipeline is solid.** Spec steps 2–4 are done: server-side pricing, a live kitchen board, guarded status changes, and an outbox row written in the same DB transaction as "delivered". Step 5's posting machinery is done too (unique key, retries with backoff, terminal states, sweeper, manual retry/resolve API). All of it is unit-tested and was exercised end-to-end against a *fake* HAIP.
+- **The order pipeline is solid.** Spec steps 2–4 are done: server-side pricing, a live kitchen board, guarded status changes, and an outbox row written in the same DB transaction as "delivered". Step 5's posting machinery is done too (unique key, retries with backoff, terminal states, sweeper, manual retry/resolve API). All of it is unit-tested, and the in-house charge path has run against real local HAIP (§9).
 - **Biggest gap: no authentication or roles anywhere in POS/KMS** (API, WebSocket, both UIs). This breaks the spec rule "do not leave the POS without authentication" and blocks tasks 3, 4, 7, 9 and 11.
-- **Biggest correctness risk: charges are routed by room number at posting time, not by stay.** HAIP's `folio-inbound` looks up whoever is in that room *when the charge arrives*. A retry or sweeper post that lands after a checkout, room move or re-letting either fails (400) or **posts to the wrong guest's folio**. POS never captures the stay or folio at order time.
+- **Biggest correctness risk: charges are routed by room number at posting time, not by stay.** HAIP's `folio-inbound` looks up whoever is in that room *when the charge arrives*. A retry or sweeper post that lands after a checkout, room move or re-letting either fails (400) or **posts to the wrong guest's folio** (confirmed live, §9 S6c). POS never captures the stay or folio at order time. The Retry guard stops re-sends of rejected rows, but a late first post can still reach the wrong guest.
 - **Step 2 of the spec ("validate room against an active stay") is missing in POS.** Any room string up to 20 characters is accepted when the order is placed. Validation happens only implicitly, inside HAIP, at posting time.
 - **Duplicate charges are prevented, but retries can end ambiguous.** Each order has a deterministic key (`stayx-rs-<orderId>`), and HAIP's unique index stops double charges. But HAIP answers a repeated key with **500** instead of the existing charge (confirmed earlier on real Postgres). So "response lost, then retry" ends as `failed` with a manual "verify the folio" step.
-- **Tax, currency and reconciliation are unverified end-to-end.**
-  - POS sends a pre-tax subtotal (correct for HAIP), but the demo HAIP has **no tax rule for `food_beverage`**, so tax would be 0.
+- **Tax works once HAIP has a rule. Currency and reconciliation are still open.**
+  - POS sends a pre-tax subtotal (correct for HAIP), but the demo HAIP has **no tax rule for `food_beverage`**, so tax is 0 by default. A temporary 12% rule posted correctly (§10).
   - Neither side checks that the order currency matches the folio currency.
   - There's no reconciliation job, and HAIP emits no webhook for folio-inbound charges.
 - **No support for cancellations or refunds after delivery, room moves, or checkout races.** `delivered` is final, and reversing a HAIP charge needs a staff JWT that POS doesn't have.
@@ -40,9 +41,9 @@ Method: code reading with `file:line` evidence. Nothing was run, migrated, insta
 | Worker / queue | BullMQ queue `haip-post-outbox`, 5 attempts, exponential backoff from 15 s, jobId = outbox id; worker concurrency 2; sweeper every 60 s | `haip/haip-queue.service.ts:6-24,47`, `haip/outbox.worker.ts:11,50,56,71` |
 | HAIP client | `POST {HAIP_API_URL}/folio-inbound/charges`, `x-api-key`, 10 s timeout, never throws, redacts key | `haip/haip-client.ts:15,34-43,88` |
 | Config | `pos/.env` via `process.loadEnvFile`; `HAIP_API_URL/KEY/PROPERTY_ID/TIMEZONE`, `REDIS_URL`, `DATABASE_URL`, `CORS_ORIGINS`, `PORT`; bridge disabled without key | `load-env.ts`, `haip/haip.config.ts:35-48`, `.env.example` |
-| Front ends | `apps/pos` (order entry, cart, recent orders, menu admin), `apps/kms` (4-column board, status buttons, sound). Both plain fetch + socket.io-client; property from `?propertyId=` or `VITE_DEFAULT_PROPERTY_ID` | `apps/pos/src/App.tsx`, `apps/kms/src/App.tsx`, `apps/*/src/config.ts` |
-| Tests | 19 spec files, all unit tests with mocked DB/fetch/queue (API 89, KMS 28, POS 46 at last run). No DB-backed or HAIP-backed tests in repo. `apps/api/test/app.e2e-spec.ts` is Nest boilerplate (`GET /` → "Hello World!") | `git ls-files '*.spec.ts'`, `apps/api/test/app.e2e-spec.ts:21-23` |
-| Not covered by tests | `menu.service`, `outbox.service` (retry/resolve), `outbox.worker` (sweeper), `haip.config`, controllers, gateway auth | absence of spec files |
+| Front ends | `apps/pos` (order entry, cart, recent orders, menu admin), `apps/kms` (4-column board, status buttons, sound). Both plain fetch + socket.io-client, styled through `packages/ui` (§12); property from `?propertyId=` or `VITE_DEFAULT_PROPERTY_ID` | `apps/pos/src/App.tsx`, `apps/kms/src/App.tsx`, `apps/*/src/config.ts` |
+| Tests | 23 spec files, all unit tests with mocked DB/fetch/queue (API 113, POS 46, KMS 28, UI 5 on 2026-11-05). No automated DB-backed or HAIP-backed tests in repo; the manual live runs are in `scripts/live-run*.mjs`. `apps/api/test/app.e2e-spec.ts` is Nest boilerplate (`GET /` → "Hello World!") | `git ls-files '*.spec.ts'`, `apps/api/test/app.e2e-spec.ts:21-23` |
+| Not covered by tests | `menu.service`, `haip.config`, controllers, gateway auth, React components (§7 item 20) | absence of spec files |
 
 ---
 
@@ -54,8 +55,8 @@ Method: code reading with `file:line` evidence. Nothing was run, migrated, insta
 | 2 | Restaurant creates order; POS prices on backend | **Partial** | `orders.service.ts:46-60,64-69` (one transaction), `order-pricing.ts:41-78` (decimal.js, rejects unknown/unavailable/mixed currency), `dto/order.dto.ts:50-51` | **No room/stay validation** (any ≤20-char string). No capture of HAIP reservation/folio. No auth or user attribution (`placedBy` is free text, `dto/order.dto.ts:70-71`) |
 | 3 | Kitchen prepares; KMS live | **Done** | `order-status.ts:9-16` (forward-only), `orders.service.ts:132-158` (optimistic concurrency → 409), `order-events.service.ts` (emit after commit), `apps/kms/src/useKitchen.ts`, `apps/kms/src/api.ts:44-45` (status via `PATCH` API only) | No auth on socket or PATCH. Any client can join any property room and read all orders (room numbers, notes) |
 | 4 | Delivered → hotel-charge task in same transaction | **Done** | `orders.service.ts:161-170` (outbox insert inside `db.transaction`, `onConflictDoNothing` on `(property_id, vendor_txn_id)`), enqueue after commit `:181`, `outbox.ts` unique index (`migration:68`) | None on POS side |
-| 5 | Worker validates and posts; retries safely | **Partial** | `outbox.processor.ts:48-119`, `charge-mapper.ts:29,45-77`, `haip-client.ts`, `outbox.worker.ts:56-88` | "Validates room/stay": only the property check (`processor.ts:50`). Room/stay validity is left to HAIP. Posting is by room number, so it's **wrong-guest prone** on late retries. Duplicate-retry 500 is ambiguous (HAIP bug). No max-age guard |
-| 6 | HAIP updates folio with tax | **Can't verify against real HAIP** | Contract read in HAIP: `folio-inbound.service.ts:19-100`, `folio.service.ts:712-820` | Tax only if a HAIP tax rule targets `food_beverage` (none seeded). Possible 500 for rates ≥10% (HAIP column `charges.tax_rate numeric(5,4)`, `schema/folio.ts:102`; inferred, not run). Currency not checked by either side |
+| 5 | Worker validates and posts; retries safely | **Partial** | `outbox.processor.ts:48-119`, `charge-mapper.ts:29,45-77`, `haip-client.ts`, `outbox.worker.ts:56-88` | "Validates room/stay": only the property check (`processor.ts:50`). Room/stay validity is left to HAIP. Posting is by room number, so it's **wrong-guest prone** on late retries. Duplicate-retry 500 is ambiguous (HAIP bug). No max-age guard. The Retry guard blocks re-sends of rows rejected as having no in-house guest |
+| 6 | HAIP updates folio with tax | **Verified against real HAIP** (§9 S1, S7c; §10 Re-test) | Contract read in HAIP: `folio-inbound.service.ts:19-100`, `folio.service.ts:712-820` | Tax only if a HAIP tax rule targets `food_beverage` (none seeded). The ≥10% overflow is fixed by HAIP migration 0030. Currency not checked by either side |
 | 7 | Checkout settles folio incl. restaurant charges | HAIP-owned; **risk on POS side** | HAIP `reservation.service.ts` ~L787: checkout requires zero balance on open folios | Charges still pending in POS at checkout won't land (after checkout, folio-inbound → 400 → `needs_attention`). POS can't warn the front desk, and HAIP can't see pending POS charges |
 
 ---
@@ -80,18 +81,18 @@ No data-duplication violations were found. The two ownership problems are a **mi
 
 | # | Task | Owner | Real status | Evidence | Next action (POS/KMS) | Depends on HAIP |
 |---|---|---|---|---|---|---|
-| 1 | Connect delivered order to an actual HAIP folio | Shared | **Partial** | Outbox and worker post to `folio-inbound` (`haip-client.ts:34`); tested only against a fake HAIP | Capture the stay at order time; post to the folio of *that* stay; run against real HAIP | Stay/folio lookup readable with the API key; idempotent post by folio or reservation (see §6) |
+| 1 | Connect delivered order to an actual HAIP folio | Shared | **Partial** | Outbox and worker post to `folio-inbound` (`haip-client.ts:34`); verified against real local HAIP for in-house guests (§9 S1) | Capture the stay at order time; post to the folio of *that* stay | Stay/folio lookup readable with the API key; idempotent post by folio or reservation (see §6) |
 | 2 | Validate room, property, active stay | POS (+HAIP data) | **Missing** | `dto/order.dto.ts:50-51` accepts any string | Validate on `POST /orders` (and re-check in the worker before posting); store `haipReservationId`/`haipFolioId` on the order | An API-key endpoint "active stay by room" (doesn't exist), or webhooks with room numbers |
 | 3 | Login across HMS, POS, KMS | Shared | **Missing in POS/KMS** | No guards in API, no login in `apps/pos`/`apps/kms` | Validate HAIP's Keycloak JWTs in the API (JWKS, `iss`, `aud`); log in from both UIs (OIDC PKCE); authenticate the socket handshake | Keycloak realm needs a POS client, audience mapper and a `property_ids` claim; HAIP realm currently has neither mapper |
 | 4 | Role-based permissions | Shared | **Missing in POS** | No role checks anywhere | Roles: restaurant staff (orders, menu read), kitchen (status only), manager (menu edit, outbox, reports), admin; enforce per route and per socket event | Agree role names in Keycloak (HAIP has `admin`, `front_desk`, … but no restaurant/kitchen roles) |
-| 5 | Prevent duplicates; handle failures safely | Shared | **Done (POS side)**; HAIP side buggy | Deterministic key `charge-mapper.ts:29`; outbox in same transaction `orders.service.ts:161-170`; retry/terminal/final logic `outbox.processor.ts:73-119`; status-guarded writes `:136`; sweeper `outbox.worker.ts:71` | Add a max-age/stay guard before auto-posting; add tests for `outbox.service`/sweeper; surface `failed` rows in a UI | HAIP must return the existing charge (200) for a repeated `vendorTxnId` instead of 500 |
-| 6 | Tax, currency, reconciliation | Shared | **Can't verify** | Pre-tax amount `charge-mapper.ts:53`; currency free per menu item (`menu-item.dto`); `haipChargeId` stored on success | Check order currency = HAIP property currency (available via `GET /connect/properties/:id`); nightly reconciliation of `posted` rows against the HAIP folio | A `food_beverage` tax rule on the property; widen `charges.tax_rate`; folio-inbound should emit `folio.charge_posted`; an API-key read of charges by `vendorTxnId` |
-| 7 | One branded entry point and shared navigation | Shared | **Missing** | Two separate apps on :5173/:5174, no shared shell | After auth: one launcher that routes by role (POS / Kitchen / Overview) | Shared login (task 3) |
+| 5 | Prevent duplicates; handle failures safely | Shared | **Done (POS side)**; HAIP side buggy | Deterministic key `charge-mapper.ts:29`; outbox in same transaction `orders.service.ts:161-170`; retry/terminal/final logic `outbox.processor.ts:73-119`; status-guarded writes `:136`; sweeper `outbox.worker.ts:71` | Add a max-age/stay guard before auto-posting; surface `failed` rows in a UI | HAIP must return the existing charge (200) for a repeated `vendorTxnId` instead of 500 |
+| 6 | Tax, currency, reconciliation | Shared | **Partial** (tax verified live, §10; currency and reconciliation open) | Pre-tax amount `charge-mapper.ts:53`; currency free per menu item (`menu-item.dto`); `haipChargeId` stored on success | Check order currency = HAIP property currency (available via `GET /connect/properties/:id`); nightly reconciliation of `posted` rows against the HAIP folio | A `food_beverage` tax rule on the property; folio-inbound should emit `folio.charge_posted`; an API-key read of charges by `vendorTxnId` |
+| 7 | One branded entry point and shared navigation | Shared | **Partial** (shared look only) | Two separate apps on :5180 (POS) and :5181 (KMS). They share a HAIP-style shell through `packages/ui` (§12), but there's no single entry point | After auth: one launcher that routes by role (POS / Kitchen / Overview) | Shared login (task 3) |
 | 8 | Property mapping HMS ↔ POS | Shared | **Partial** | Single env `HAIP_PROPERTY_ID` (`haip.config.ts:45`); POS `property_id` unvalidated | Add a `properties` mapping table (POS property → HAIP property + key reference + currency + timezone) and validate `propertyId` on every request | Per-property API keys (exist: `/admin/connect/credentials`) |
 | 9 | Integration-status / error screen | POS | **Partial (API only)** | `GET /outbox`, `retry`, `resolve` exist (`outbox.controller.ts`); no UI in `apps/pos` | Add an "Outbox" tab: filters, `lastError`, retry/resolve with a "verify folio first" warning for `failed` | — |
 | 10 | Consolidated hotel + restaurant reports | Shared | **Missing** | No report endpoints in POS | Add POS sales and posting reports (by day, outlet, status) as an API for a shared Overview | HAIP reporting integration point |
 | 11 | Centralized user and property admin | Shared | **Missing in POS** | No users/properties in POS | Consume the shared identity; property mapping admin (task 8) | Identity provider ownership decision |
-| 12 | Test refunds, cancellations, room moves, checkout, network failures | Shared | **Mostly missing** | Unit tests cover network/5xx/timeout classification (`haip-client.spec.ts`, `outbox.processor.spec.ts`); the fake-HAIP e2e was a throwaway (not in repo); **no code paths** for refunds/voids or room moves | Write the missing flows first (see §5), then a committed integration suite against a fake HAIP plus a scripted run against local HAIP | HAIP test data; reversal endpoint usable by POS |
+| 12 | Test refunds, cancellations, room moves, checkout, network failures | Shared | **Mostly missing** | Unit tests cover network/5xx/timeout classification (`haip-client.spec.ts`, `outbox.processor.spec.ts`); `scripts/live-run*.mjs` ran room moves, checkout and re-letting against local HAIP (§9); **no code paths** for refunds/voids or room moves | Write the missing flows first (see §5), then a committed integration suite against a fake HAIP. The scripted local HAIP run already exists | HAIP test data; reversal endpoint usable by POS |
 | 13 | Secure deployment, secrets, backups, monitoring | Shared | **Not done** | Swagger always on (`main.ts:31`); no rate limit/health; dev DB creds in compose and default URL (`database.module.ts:11`); key redacted in logs (`haip-client.ts:88`) | Gate Swagger; `/health`; rate limiting; secrets from a manager; DB backups; metrics/alerts on outbox `failed`/`needs_attention` count and queue depth; API Dockerfile | — |
 
 ---
@@ -107,14 +108,14 @@ No data-duplication violations were found. The two ownership problems are a **mi
 - **Concurrent staff action:** worker and staff writes only apply to `pending` or actionable rows (`processor.ts:136`, `outbox.service.ts:65`).
 - **Residual risks:**
   1. **HAIP duplicate-key bug.** A lost response followed by retries ends as `failed` and needs a human. This is HAIP-side.
-  2. **Wrong-guest posting.** A late retry or sweeper post goes to whoever occupies the room *now* (HAIP `folio-inbound.service.ts:52-80`). There's no max-age check and no stay identity.
+  2. **Wrong-guest posting.** A late retry or sweeper post goes to whoever occupies the room *now* (HAIP `folio-inbound.service.ts:52-80`). Confirmed live (§9 S6c). There's no max-age check and no stay identity, and the Retry guard only covers re-sends of rejected rows.
   3. **No alerting** on `failed`/`needs_attention`. They're only visible via `GET /outbox`.
 
 ### 5.2 Tax, currency, rounding
 - **POS:** line totals and the subtotal are computed with decimal.js at 2 dp (`order-pricing.ts:71-78`). The amount sent is the pre-tax subtotal (`charge-mapper.ts:53`), which matches HAIP: HAIP adds tax itself as child `type:'tax'` rows (`folio.service.ts:787-807`).
 - **HAIP tax only applies if** the property's active tax profile has a rule for `food_beverage`. The demo seed has none, so tax = 0.
   - The demo property has **two active profiles** and the pick is non-deterministic (see `../HAIP_INSIGHTS.md`).
-  - Rates of 10% or more may overflow `charges.tax_rate numeric(5,4)` (`schema/folio.ts:102`). That's inferred, not run.
+  - Rates of 10% or more overflowed `charges.tax_rate numeric(5,4)` (confirmed, §9 S7a). HAIP migration 0030 fixed this, and 12% was verified live (§10).
 - **Currency:** POS allows any 3-character currency per menu item. HAIP `postCharge` does not compare the charge currency to the folio currency (0 matches in `postCharge`). **A wrong-currency charge would be summed into the balance.** POS should enforce the property currency.
 - **Service date:** delivery time converted to a calendar date in `HAIP_TIMEZONE` (`charge-mapper.ts:58`). That's correct only if the env matches the HAIP property's timezone (available via `GET /connect/properties/:id`).
 
@@ -164,7 +165,7 @@ What POS needs but can't get today:
 3. **Max-age guard on auto-posting** (S): don't auto-post rows older than N hours, or after a `checked_out` or `room_moved` event; park them for a human.
 4. **Property mapping table** (M): POS property → HAIP property, key reference, currency, timezone. Validate `propertyId` on every request. Read currency and timezone from `GET /connect/properties/:id`. Removes the single `HAIP_PROPERTY_ID` env.
 5. **Currency enforcement** (S): menu items and orders must use the mapped property currency.
-6. **Run once against real local HAIP** (S, needs your go-ahead to start containers): one full post, a duplicate, a vacant room and a checked-out guest. Record the results.
+6. **Run once against real local HAIP: done** (§9, §10). Scripts are in `scripts/`.
 
 **B. Security**
 7. **API authentication** (M): validate HAIP Keycloak JWTs (JWKS, `iss`, `aud`, `azp`) with a global guard and `@Public()` only for health.
@@ -178,7 +179,7 @@ What POS needs but can't get today:
 13. **Outbox screen in `apps/pos`** (M): list, filter, `lastError`, retry/resolve with a "verify folio first" warning for `failed`.
 14. **Reconciliation job** (M): daily compare of `posted` rows against HAIP folio charges (needs HAIP Q5); alert on mismatches.
 15. **Alerts** (S): log or metric when `failed`/`needs_attention` rows appear; queue depth.
-16. **Tests** (M): `outbox.service` (retry/resolve), sweeper, `haip.config`; a committed fake-HAIP integration test; replace the boilerplate `app.e2e-spec.ts`.
+16. **Tests** (M): `haip.config`; a committed fake-HAIP integration test; replace the boilerplate `app.e2e-spec.ts`.
 
 **D. Nice to have**
 17. Role-based launcher / single entry point (M, after auth).
@@ -197,7 +198,7 @@ What POS needs but can't get today:
 3. **Duplicate `vendorTxnId`:** will HAIP fix the duplicate path to return the existing charge (200/201) instead of 500? The insert error aborts the transaction, so the follow-up SELECT fails with `25P02`.
 4. **Reversal:** can a POS key reverse a charge it posted (by `vendorTxnId`), or must refunds go through front-desk staff?
 5. **Reconciliation:** will folio-inbound emit `folio.charge_posted`? Can a key read a charge by `vendorTxnId`?
-6. **Tax:** which tax rule should apply to restaurant charges? Should `charges.tax_rate` be widened so rates of 10% or more work? Which of the demo property's two active tax profiles is meant to be active?
+6. **Tax:** which tax rule should apply to restaurant charges? Which of the demo property's two active tax profiles is meant to be active? (Rates of 10% or more now work after HAIP migration 0030.)
 7. **Currency:** should HAIP reject a charge whose currency differs from the folio's?
 8. **Checkout:** should HAIP warn or block checkout when the POS has unposted charges for the stay (via a POS endpoint or webhook), or is that a front-desk process?
 9. **Identity:** will the shared Keycloak realm get POS/kitchen roles, an audience mapper for the POS API and a `property_ids` claim? Who owns user admin (task 11)?
@@ -217,7 +218,7 @@ Run on 2026-10-25 against **real local HAIP** (`haip` at `cb8d140`, Docker image
   - **Why the scratch DB:** the demo DB `stayx_pos` has 3 old `pending` outbox rows (from 2026-10-07/10). The sweeper would have posted those to real HAIP folios. `stayx_pos` was not touched.
 - **API key.** A temporary property-scoped Connect key was created through HAIP's admin API, held only in memory (never printed or written), and **revoked** at the end. A post with it afterwards returned 401, and the key does not appear in the POS logs.
 - **Test data.** HAIP demo property TGH (`a0000001-…0001`, USD, America/New_York); one POS menu item at 20.00 USD.
-- **Run scripts** (outside the repo, in the session scratchpad): `live-run.mjs` and `live-run-relet.mjs`.
+- **Run scripts:** `scripts/live-run.mjs` and `scripts/live-run-relet.mjs`.
 
 ### Results
 
@@ -232,7 +233,7 @@ Run on 2026-10-25 against **real local HAIP** (`haip` at `cb8d140`, Docker image
 | S5 | **Room move before delivery**: order for 202, guest moved 202 → 205 (HAIP move-room 200), then delivered | HAIP 400 "Room 202 is vacant…" → `needs_attention` | ❌ **The charge doesn't follow the guest.** Revenue is parked until a human acts |
 | S6a | **Checkout race**: order for room 110 (Maria Garcia, folio balance 0.00), HAIP check-out succeeded (200) while the order was `ready`, then delivered | HAIP 400 "Room 110 is vacant…" → `needs_attention` | ❌ **HAIP let the guest check out with an unposted POS charge**, and the charge can no longer reach her folio (it's closed) |
 | S6b+c | **Re-let, then staff Retry**: room 110 cleaned (`vacant_dirty → clean → vacant_clean`), reservation `…0011` (Sarah Johnson) assigned and checked in, then staff pressed **Retry** on the parked S6 row | POS row → `posted`. HAIP charge `7fa6461e-…` (food_beverage 20.00) is on **Sarah Johnson's folio** (reservation `…0011`). The order was for Maria Garcia | ❌ **Confirmed: charge posted to the wrong guest.** The retry button and the sweeper both post by room number at post time (§5.1 risk 2). This is the top integration risk |
-| S7a | **12% `food_beverage` tax**: rule `LIVE_FB` (percentage, 12.0000, `food_beverage`) added via `POST /tax/profiles/:id/rules` to **both** active TGH profiles (avoids the profile-pick ambiguity). `POST /tax/calculate` preview → 2.40 on 20.00. Then a direct post to room 210 | HAIP **500**. HAIP log: `numeric field overflow`. The whole transaction rolled back, so no `folio_inbound_posts` row and no charge | ❌ **Confirmed: any tax rate ≥ 10% breaks charge posting.** The rule's rate (e.g. `12.0000`) is copied into `charges.tax_rate numeric(5,4)`, whose max is 9.9999. That includes Barcelona's seeded 10% IVA if it were applied to a charge type that gets posted |
+| S7a | **12% `food_beverage` tax**: rule `LIVE_FB` (percentage, 12.0000, `food_beverage`) added via `POST /tax/profiles/:id/rules` to **both** active TGH profiles (avoids the profile-pick ambiguity). `POST /tax/calculate` preview → 2.40 on 20.00. Then a direct post to room 210 | HAIP **500**. HAIP log: `numeric field overflow`. The whole transaction rolled back, so no `folio_inbound_posts` row and no charge | ❌ **Confirmed: any tax rate ≥ 10% breaks charge posting.** The rule's rate (e.g. `12.0000`) is copied into `charges.tax_rate numeric(5,4)`, whose max is 9.9999. That includes Barcelona's seeded 10% IVA if it were applied to a charge type that gets posted. Fixed later, see §10 |
 | S7b | Same through POS, room 210 (Hans Mueller) | Attempt 1: `HTTP 500`, row stays `pending` (retryable) | POS behaves correctly; the cause is HAIP's |
 | S7c | Rule changed to 9% while POS was backing off | Attempt 2 (~15 s later) → `posted`. HAIP has the parent `food_beverage` 20.00 plus a child `tax` row of **1.80**, `tax_rate 9.0000`, "Live-run F&B tax", same folio | ✅ Tax rows work below 10% and are added by HAIP on top of the pre-tax amount POS sends. POS stores only the parent `haipChargeId` and never learns the tax amount |
 | S7d | Cleanup | Both `LIVE_FB` rules deleted (0 remaining) | — |
@@ -241,14 +242,15 @@ Run on 2026-10-25 against **real local HAIP** (`haip` at `cb8d140`, Docker image
 
 - **Task 1 (§4):** POS → HAIP posting is now **verified against real HAIP** for the in-house case (S1, S7c). It's still Partial because of S5/S6.
 - **Task 5 / §5.1:** idempotency holds in practice: 6 replays of the same key (1 direct + 5 POS retries), still 1 charge. The duplicate→500 bug is confirmed (S2a/S2b).
-- **Task 6 / §5.2:** the tax overflow at ≥10% has moved from *inferred* to **confirmed** (S7a). It's a HAIP blocker for any F&B tax of 10% or more, and should be added to §8 Q6 as a must-fix.
-- **§5.1 risk 2 (wrong guest)** has moved from *inferred* to **confirmed** (S6c). It raises the priority of TODO A1–A3. **Follow-up (done):** POS now refuses to re-send any row HAIP rejected with "is vacant or has no in-house reservation".
+- **Task 6 / §5.2:** the tax overflow at ≥10% has moved from *inferred* to **confirmed** (S7a). HAIP later fixed it in migration 0030, and 12% was verified live (§10).
+- **§5.1 risk 2 (wrong guest)** has moved from *inferred* to **confirmed** (S6c). It raises the priority of TODO A1–A3. **Follow-up (committed in `e6ef9ef`; unit tested, but the 409 hasn't been seen against live HAIP):** POS now refuses to re-send any row HAIP rejected with "is vacant or has no in-house reservation".
   - `POST /outbox/:id/retry` → 409. The sweeper skips these rows, and the processor won't send one even if it is set back to `pending` by hand.
   - Staff must post the charge to the right folio in HAIP, then use `resolve` (`apps/api/src/haip/no-in-house-guard.ts`).
   - The match is on HAIP's error text, so it fails open if HAIP changes that wording. A dedicated `parked_reason` column (needs a migration) would be sturdier.
+  - It doesn't cover a late first post, `failed` rows or automatic retries, so the wrong-guest risk stays open until POS posts by stay.
 - **§5.3 checkout:** HAIP allows checkout while POS still holds an unposted charge for that room (S6a). That confirms §8 Q8 matters.
 
-### State left behind
+### State left behind (as of the 2026-10-25 run)
 
 - **HAIP demo DB (persisted in the `haip_postgres-data` volume):**
   - Charges posted: 20.00 on res `…0007`, 20.00 + 1.80 tax on `…000b`, and the wrong-guest 20.00 on `…0011`.
@@ -320,7 +322,7 @@ Most of the update is payments (Worldline and hosted Connect checkout), phone-ba
   - POS API built from the current tree (includes the no-in-house guard), on scratch DB `stayx_pos_live`;
   - temporary key, revoked afterwards (a post with it then returned 401; the key is not in the POS log);
   - `LIVE_FB` 12% `food_beverage` rule on both active TGH profiles, deleted afterwards.
-- **Script:** scratchpad `live-run-tax12.mjs`, the S7 steps only from `scripts/live-run.mjs`.
+- **Script:** `scripts/live-run-tax12.mjs`, the S7 steps only from `scripts/live-run.mjs`.
 
 | Step | Result |
 |---|---|
@@ -333,3 +335,35 @@ Most of the update is payments (Worldline and hosted Connect checkout), phone-ba
 ### Questions still to send to the HAIP team
 
 Q1, Q2, Q3, Q4, Q5, Q7, Q8, Q9 and Q10 as written in §8. Q6 is reduced to: "Which tax rule should apply to restaurant (`food_beverage`) charges, and which of the demo property's two active tax profiles is meant to be active? (The `tax_rate` width is fixed in 0030.)"
+
+---
+
+## 11. HAIP update (def7c03 → 928c2f6)
+
+Reviewed on 2026-11-04 by reading `git log` and `git diff def7c03..928c2f6` in `haip` (14 commits), and by comparing migration 0029 with the local database. The §9 and §10 live runs weren't repeated on `928c2f6`.
+
+**Nothing in this update affects POS.**
+- **Unchanged since `def7c03`:** `modules/folio-inbound/`, `modules/pos/`, `modules/tax/`, `modules/folio/`, `modules/reservation/`, `modules/webhook/`, `modules/auth/`, `connect-content.service.ts`, `keycloak/`, `push-schema.ts`, `migration-runner.ts` and `seed.ts`.
+- **What changed:** Connect branding clean-up (default booking channel `LIGARE` → `connect`, `clientPlatform` is now free text), guest check-in signatures, guest communications, and room status: `clean`, `inspected` and `guest_ready` rooms can now go back to `vacant_dirty`. POS uses none of these.
+- **Open questions:** all items listed in §10 "Questions still to send" are unchanged.
+
+### Migration note: 0029 edited after it was applied
+
+- `0029_connect_payment_sessions.sql` was edited in `7310783` after it had been applied locally. It's the only migration changed, and there are no new ones.
+- The edit only removes "(Ligare Hotels)" from a SQL comment, so the schema is the same. The local `connect_payment_sessions` table matches the file (21 columns, 5 foreign keys, 2 checks, primary key and 4 indexes) and has 0 rows. No database change is needed.
+- POS has no references to this table or the Connect booking payment routes.
+- **Process risk for the HAIP team:** `migration-runner.ts` tracks version, filename and applied time, with no checksum. An edit to an applied migration is neither re-run nor detected, so `haip-init` would still report "No pending SQL migrations" if a real schema change were made that way. Schema changes should always go in a new migration.
+
+---
+
+## 12. UI restyle
+
+POS and KMS now match HAIP's staff dashboard through a shared package, `packages/ui` (merged in `9c6e07b`).
+
+- **What's in it:** HAIP's colours and class names as Tailwind 4 tokens, self-hosted Montserrat, lucide icons and shared components. Parts are adapted from HAIP under Apache-2.0; see `packages/ui/NOTICE.md`.
+- **POS (port 5180):** HAIP's sidebar and top bar, with order entry, cart, recent orders and menu admin restyled. Outbox/Errors is a greyed-out nav item until that screen exists.
+- **KMS (port 5181):** light kitchen board with a top bar only, large touch targets and navy text on teal, orange and yellow for contrast.
+- **Ports:** moved from 5174 (POS) and 5173 (KMS), because 5173 clashed with HAIP's dashboard.
+- **Behaviour:** API calls and order, cart and board logic are unchanged. KMS Cancel now uses a styled confirm modal, with the same confirm step.
+- **Checked on 2026-11-05:** both apps loaded on the new ports against the real POS API with the HAIP bridge off, and got 200s with the right CORS origin plus a live socket. The demo property had no active orders, so tickets were only seen with mock data.
+- **Not yet tested:** a real kitchen tablet (§7 items 21 and 22) and React component tests (§7 item 20).
