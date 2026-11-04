@@ -42,9 +42,14 @@ export function NewOrder(props: Props) {
     <>
       <PageHeader title="New order" icon={ClipboardList} className="mb-4!" />
       <div className="grid flex-1 grid-cols-[minmax(0,1fr)] gap-4 lg:min-h-0 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
-        <section className="flex flex-col gap-4 lg:min-h-0 lg:overflow-y-auto" aria-label="Menu">
-          <MenuTiles menu={props.menu} onAdd={(item) => props.dispatchCart({ type: 'add', item })} />
-          <RecentOrders orders={props.recent} />
+        {/* Below lg the section dissolves, so the order classes put the cart between menu and recent orders. */}
+        <section className="contents lg:flex lg:min-h-0 lg:flex-col lg:gap-4 lg:overflow-y-auto" aria-label="Menu">
+          <div className="order-1 flex flex-col gap-4">
+            <MenuTiles menu={props.menu} onAdd={(item) => props.dispatchCart({ type: 'add', item })} />
+          </div>
+          <div className="order-3">
+            <RecentOrders orders={props.recent} />
+          </div>
         </section>
         <CartPanel {...props} />
       </div>
@@ -114,7 +119,7 @@ function CartPanel({
   const canPlace = cart.lines.length > 0 && roomNumber.trim() !== '' && subtotal.kind !== 'mixed' && !submitting;
 
   return (
-    <aside className="flex flex-col gap-3 rounded-xl bg-white p-4 shadow-sm lg:min-h-0" aria-label="Cart">
+    <aside className="order-2 flex flex-col gap-3 rounded-xl bg-white p-4 shadow-sm lg:min-h-0" aria-label="Cart">
       <h2 className="text-lg font-semibold text-telivity-navy">Order</h2>
 
       <Field label="Room number *">
