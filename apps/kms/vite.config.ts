@@ -5,7 +5,7 @@ import tailwindcss from '@tailwindcss/vite';
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    port: 5173,
+    port: 5181,
     strictPort: true,
     // Listen on the LAN so a kitchen tablet on the same Wi-Fi can open it.
     host: true,

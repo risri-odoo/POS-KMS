@@ -1,0 +1,108 @@
+/*
+ * StayX design tokens, matched to HAIP's staff dashboard.
+ * Colour values and animations come from HAIP apps/dashboard/tailwind.config.ts
+ * (Copyright 2026 Telivity, Apache-2.0; see ../LICENSE.haip and ../NOTICE.md).
+ *
+ * Use after `@import 'tailwindcss';` in an app's stylesheet. Token names match
+ * HAIP, so classes such as bg-telivity-teal mean the same in all three apps.
+ */
+
+/* Same weights HAIP loads, so medium and bold text render the same way. */
+@import '@fontsource/montserrat/300.css';
+@import '@fontsource/montserrat/400.css';
+@import '@fontsource/montserrat/600.css';
+
+@source './';
+
+@theme {
+  --color-telivity-teal: #06bdb4;
+  --color-telivity-dark-teal: #00a692;
+  --color-telivity-light-teal: #2cd1b9;
+  --color-telivity-orange: #f2641b;
+  --color-telivity-orange-lt: #ff7d36;
+  --color-telivity-yellow: #eec517;
+  --color-telivity-deep-blue: #016491;
+  --color-telivity-purple: #5838c0;
+  --color-telivity-navy: #23273d;
+  --color-telivity-slate: #444863;
+  --color-telivity-light-grey: #f0f0f6;
+  --color-telivity-mid-grey: #bbbbc4;
+
+  --font-sans: Montserrat, Arial, Helvetica, sans-serif;
+
+  /*
+   * HAIP runs Tailwind 3 and we run Tailwind 4, which changed these defaults.
+   * Pinned to the Tailwind 3 values so the same class looks the same.
+   */
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f3f4f6;
+  --color-gray-200: #e5e7eb;
+  --color-gray-300: #d1d5db;
+  --color-gray-400: #9ca3af;
+  --color-gray-500: #6b7280;
+  --color-gray-600: #4b5563;
+  --color-gray-700: #374151;
+  --color-red-50: #fef2f2;
+  --color-red-500: #ef4444;
+  --color-red-600: #dc2626;
+  --color-red-700: #b91c1c;
+
+  --animate-slide-in: slide-in 0.2s ease-out;
+  --animate-skeleton: pulse-skeleton 1.5s ease-in-out infinite;
+
+  @keyframes slide-in {
+    from {
+      opacity: 0;
+      transform: translateX(100%);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+
+  @keyframes pulse-skeleton {
+    0%,
+    100% {
+      opacity: 0.4;
+    }
+    50% {
+      opacity: 0.7;
+    }
+  }
+}
+
+@layer base {
+  /* Tailwind 3 defaults that Tailwind 4 dropped. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--color-gray-200);
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--color-gray-400);
+  }
+
+  button:not(:disabled),
+  [role='button']:not(:disabled) {
+    cursor: pointer;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-telivity-light-grey);
+    color: var(--color-telivity-navy);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    -webkit-tap-highlight-color: transparent;
+  }
+}

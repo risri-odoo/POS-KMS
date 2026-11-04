@@ -104,4 +104,4 @@ Next:
   pnpm dev:all      start the API, kitchen display and POS (Ctrl+C stops all three)
   pnpm seed:demo    in a second terminal, once the API is up: add a demo menu
 
-Then open http://localhost:5174 (POS) and http://localhost:5173 (kitchen).`);
+Then open http://localhost:5180 (POS) and http://localhost:5181 (kitchen).`);

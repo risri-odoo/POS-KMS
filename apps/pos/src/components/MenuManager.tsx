@@ -1,4 +1,20 @@
 import { useState, type FormEvent } from 'react';
+import { UtensilsCrossed } from 'lucide-react';
+import {
+  Button,
+  Card,
+  CardTitle,
+  Field,
+  Input,
+  PageHeader,
+  SkeletonTable,
+  Table,
+  TableCell,
+  TableEmpty,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@stayx/ui';
 import { createMenuItem, messageOf, updateMenuItem } from '../api.js';
 import {
   formatPrice,
@@ -34,28 +50,26 @@ export function MenuManager({ propertyId, menu, onMenuChange, notify }: Props) {
   };
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-3">
-      <AddItemForm propertyId={propertyId} onCreated={(item) => onMenuChange((m) => [...m, item])} notify={notify} />
+    <>
+      <PageHeader title="Menu" icon={UtensilsCrossed} className="mb-4!" />
+      <div className="flex flex-col gap-4">
+        <AddItemForm propertyId={propertyId} onCreated={(item) => onMenuChange((m) => [...m, item])} notify={notify} />
 
-      <section className="rounded-xl bg-neutral-900 p-3" aria-label="Menu items">
-        <h2 className="mb-2 text-2xl font-bold">Menu items</h2>
-        {menu === null ? (
-          <p className="text-lg text-neutral-400">Loading…</p>
-        ) : menu.length === 0 ? (
-          <p className="text-lg text-neutral-400">No menu items yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[40rem] text-left text-lg">
-              <thead className="text-base text-neutral-400">
-                <tr>
-                  <th className="p-2">Name</th>
-                  <th className="p-2">Category</th>
-                  <th className="p-2">Price</th>
-                  <th className="p-2">Available</th>
-                  <th className="p-2" />
-                </tr>
-              </thead>
+        <section aria-label="Menu items">
+          <h2 className="mb-2 text-sm font-semibold text-telivity-navy">Menu items</h2>
+          {menu === null ? (
+            <SkeletonTable cols={5} />
+          ) : (
+            <Table tableClassName="min-w-[40rem]">
+              <TableHead>
+                <TableHeader>Name</TableHeader>
+                <TableHeader>Category</TableHeader>
+                <TableHeader>Price</TableHeader>
+                <TableHeader>Available</TableHeader>
+                <TableHeader />
+              </TableHead>
               <tbody>
+                {menu.length === 0 && <TableEmpty colSpan={5}>No menu items yet.</TableEmpty>}
                 {menu.map((item) => (
                   <MenuRow
                     key={item.id}
@@ -67,14 +81,14 @@ export function MenuManager({ propertyId, menu, onMenuChange, notify }: Props) {
                   />
                 ))}
               </tbody>
-            </table>
-          </div>
-        )}
-        <p className="mt-2 text-sm text-neutral-500">
-          Changing a price only affects new orders. Existing orders keep the prices they were placed with.
-        </p>
-      </section>
-    </div>
+            </Table>
+          )}
+          <p className="mt-2 text-xs text-gray-500">
+            Changing a price only affects new orders. Existing orders keep the prices they were placed with.
+          </p>
+        </section>
+      </div>
+    </>
   );
 }
 
@@ -136,59 +150,59 @@ function MenuRow({
     }
   };
 
-  const input = 'min-h-12 w-full rounded-lg border border-neutral-700 bg-neutral-950 px-2';
-
   return (
-    <tr className={`border-t border-neutral-800 align-top ${item.isAvailable ? '' : 'text-neutral-500'}`}>
+    <TableRow className={`align-top ${item.isAvailable ? '' : 'bg-gray-50 [&>td]:text-gray-500'}`}>
       {editing ? (
         <>
-          <td className="p-2">
-            <input value={name} onChange={(e) => setName(e.target.value)} maxLength={255} aria-label="Name" className={input} />
-            {error && <p className="mt-1 text-base text-red-400">{error}</p>}
-          </td>
-          <td className="p-2">
-            <input value={category} onChange={(e) => setCategory(e.target.value)} maxLength={100} aria-label="Category" className={input} />
-          </td>
-          <td className="p-2">
-            <input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" aria-label="Price" className={`${input} tabular-nums`} />
-          </td>
+          <TableCell>
+            <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={255} aria-label="Name" className="min-h-11" />
+            {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
+          </TableCell>
+          <TableCell>
+            <Input value={category} onChange={(e) => setCategory(e.target.value)} maxLength={100} aria-label="Category" className="min-h-11" />
+          </TableCell>
+          <TableCell>
+            <Input value={price} onChange={(e) => setPrice(e.target.value)} inputMode="decimal" aria-label="Price" className="min-h-11 tabular-nums" />
+          </TableCell>
         </>
       ) : (
         <>
-          <td className="p-2 font-semibold">{item.name}</td>
-          <td className="p-2">{item.category || <span className="text-neutral-600">—</span>}</td>
-          <td className="p-2 tabular-nums">{formatPrice(item.price, item.currencyCode)}</td>
+          <TableCell strong>{item.name}</TableCell>
+          <TableCell>{item.category || <span className="text-telivity-mid-grey">—</span>}</TableCell>
+          <TableCell className="tabular-nums">{formatPrice(item.price, item.currencyCode)}</TableCell>
         </>
       )}
-      <td className="p-2">
+      <TableCell>
         <button
           type="button"
           role="switch"
           aria-checked={item.isAvailable}
           aria-label={`${item.name} available`}
           onClick={onToggle}
-          className={`min-h-12 min-w-24 rounded-full px-3 font-bold ${item.isAvailable ? 'bg-emerald-600 text-white' : 'bg-neutral-700 text-neutral-300'}`}
+          className={`min-h-11 min-w-20 rounded-full px-3 text-sm font-semibold transition-colors ${
+            item.isAvailable ? 'bg-telivity-dark-teal text-white' : 'bg-gray-200 text-telivity-slate'
+          }`}
         >
           {item.isAvailable ? 'On' : 'Off'}
         </button>
-      </td>
-      <td className="p-2 text-right">
+      </TableCell>
+      <TableCell align="right">
         {editing ? (
           <div className="flex justify-end gap-2">
-            <button type="button" disabled={saving} onClick={() => void save()} className="min-h-12 rounded-lg bg-emerald-600 px-4 font-bold text-white disabled:opacity-50">
+            <Button disabled={saving} onClick={() => void save()} className="min-h-11">
               {saving ? 'Saving…' : 'Save'}
-            </button>
-            <button type="button" disabled={saving} onClick={() => setEditing(false)} className="min-h-12 rounded-lg bg-neutral-800 px-4 font-semibold">
+            </Button>
+            <Button variant="secondary" disabled={saving} onClick={() => setEditing(false)} className="min-h-11">
               Cancel
-            </button>
+            </Button>
           </div>
         ) : (
-          <button type="button" onClick={startEdit} className="min-h-12 rounded-lg bg-neutral-800 px-4 font-semibold hover:bg-neutral-700">
+          <Button variant="secondary" onClick={startEdit} className="min-h-11">
             Edit
-          </button>
+          </Button>
         )}
-      </td>
-    </tr>
+      </TableCell>
+    </TableRow>
   );
 }
 
@@ -239,25 +253,27 @@ function AddItemForm({
   };
 
   return (
-    <form onSubmit={submit} noValidate className="flex flex-col gap-3 rounded-xl bg-neutral-900 p-3" aria-label="Add menu item">
-      <h2 className="text-2xl font-bold">Add item</h2>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        <Field label="Name *" error={errors.name} value={form.name} onChange={set('name')} maxLength={255} />
-        <Field label="Category" error={errors.category} value={form.category} onChange={set('category')} maxLength={100} />
-        <Field label="Price *" error={errors.price} value={form.price} onChange={set('price')} inputMode="decimal" placeholder="12.50" />
-        <Field label="Currency" error={errors.currencyCode} value={form.currencyCode} onChange={set('currencyCode')} maxLength={3} />
-        <Field label="Sort order" error={errors.sortOrder} value={form.sortOrder} onChange={set('sortOrder')} inputMode="numeric" placeholder="0" />
-        <Field label="Description" error={errors.description} value={form.description} onChange={set('description')} />
-      </div>
-      {serverError && <p className="text-lg text-red-400">{serverError}</p>}
-      <button type="submit" disabled={saving} className="min-h-12 self-start rounded-lg bg-emerald-600 px-6 text-lg font-bold text-white disabled:opacity-50">
-        {saving ? 'Adding…' : 'Add item'}
-      </button>
-    </form>
+    <Card>
+      <form onSubmit={submit} noValidate className="flex flex-col gap-3" aria-label="Add menu item">
+        <CardTitle className="mb-0!">Add item</CardTitle>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <TextField label="Name *" error={errors.name} value={form.name} onChange={set('name')} maxLength={255} />
+          <TextField label="Category" error={errors.category} value={form.category} onChange={set('category')} maxLength={100} />
+          <TextField label="Price *" error={errors.price} value={form.price} onChange={set('price')} inputMode="decimal" placeholder="12.50" />
+          <TextField label="Currency" error={errors.currencyCode} value={form.currencyCode} onChange={set('currencyCode')} maxLength={3} />
+          <TextField label="Sort order" error={errors.sortOrder} value={form.sortOrder} onChange={set('sortOrder')} inputMode="numeric" placeholder="0" />
+          <TextField label="Description" error={errors.description} value={form.description} onChange={set('description')} />
+        </div>
+        {serverError && <p className="text-sm text-red-600">{serverError}</p>}
+        <Button type="submit" disabled={saving} className="min-h-11 self-start">
+          {saving ? 'Adding…' : 'Add item'}
+        </Button>
+      </form>
+    </Card>
   );
 }
 
-function Field({
+function TextField({
   label,
   error,
   value,
@@ -273,16 +289,8 @@ function Field({
   placeholder?: string;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-lg">
-      <span className="text-neutral-300">{label}</span>
-      <input
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        aria-invalid={Boolean(error)}
-        className={`min-h-12 rounded-lg border bg-neutral-950 px-3 ${error ? 'border-red-500' : 'border-neutral-700'}`}
-        {...rest}
-      />
-      {error && <span className="text-base text-red-400">{error}</span>}
-    </label>
+    <Field label={label} error={error}>
+      {(id) => <Input id={id} value={value} onChange={(e) => onChange(e.target.value)} invalid={Boolean(error)} className="min-h-11" {...rest} />}
+    </Field>
   );
 }

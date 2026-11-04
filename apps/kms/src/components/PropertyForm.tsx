@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from 'react';
+import { Button, Card, Field, Input } from '@stayx/ui';
 import { isUuid } from '../config.js';
 
 /** Shown when ?propertyId= is missing or not a UUID. Reloads with it set. */
@@ -20,25 +21,28 @@ export function PropertyForm({ initial }: { initial: string }) {
 
   return (
     <main className="flex min-h-full items-center justify-center p-4">
-      <form onSubmit={submit} className="flex w-full max-w-lg flex-col gap-4 rounded-xl bg-neutral-900 p-6">
-        <h1 className="text-3xl font-bold">Kitchen display</h1>
-        <label htmlFor="propertyId" className="text-lg text-neutral-300">
-          Property ID
-        </label>
-        <input
-          id="propertyId"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="00000000-0000-0000-0000-000000000000"
-          autoComplete="off"
-          spellCheck={false}
-          className="min-h-12 rounded-lg border border-neutral-700 bg-neutral-950 px-3 font-mono text-lg"
-        />
-        {error && <p className="text-lg text-red-400">{error}</p>}
-        <button type="submit" className="min-h-14 rounded-lg bg-emerald-600 text-xl font-bold text-white">
-          Open board
-        </button>
-      </form>
+      <Card padding="lg" className="w-full max-w-lg">
+        <form onSubmit={submit} className="flex flex-col gap-4">
+          <h1 className="text-2xl font-semibold text-telivity-navy">StayX Kitchen</h1>
+          <Field label="Property ID" error={error ?? undefined}>
+            {(id) => (
+              <Input
+                id={id}
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                placeholder="00000000-0000-0000-0000-000000000000"
+                autoComplete="off"
+                spellCheck={false}
+                invalid={Boolean(error)}
+                className="min-h-12 font-mono text-base!"
+              />
+            )}
+          </Field>
+          <Button type="submit" size="touch" highContrast>
+            Open board
+          </Button>
+        </form>
+      </Card>
     </main>
   );
 }

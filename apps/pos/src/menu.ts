@@ -1,4 +1,4 @@
-import type { MenuItem, OrderStatus } from './types.js';
+import type { MenuItem } from './types.js';
 
 export const OTHER_CATEGORY = 'Other';
 
@@ -41,21 +41,3 @@ export function formatAge(iso: string, now: number): string {
   if (hours < 24) return `${hours} h ${minutes % 60} min`;
   return `${Math.floor(hours / 24)} d`;
 }
-
-export const STATUS_LABEL: Record<OrderStatus, string> = {
-  placed: 'Placed',
-  accepted: 'Accepted',
-  preparing: 'Preparing',
-  ready: 'Ready',
-  delivered: 'Delivered',
-  cancelled: 'Cancelled',
-};
-
-export const STATUS_BADGE: Record<OrderStatus, string> = {
-  placed: 'bg-sky-600 text-white',
-  accepted: 'bg-indigo-600 text-white',
-  preparing: 'bg-amber-500 text-neutral-950',
-  ready: 'bg-emerald-500 text-neutral-950',
-  delivered: 'bg-neutral-700 text-neutral-200',
-  cancelled: 'bg-red-700 text-white',
-};
