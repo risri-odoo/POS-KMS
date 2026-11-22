@@ -2,7 +2,8 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { AlertTriangle, ClipboardList, UtensilsCrossed } from 'lucide-react';
 import { AppShell, HeaderDate, type NavSection } from '@stayx/ui';
 import { version } from '../package.json';
-import { ApiError, listMenu, messageOf, placeOrder } from './api.js';
+import { ApiError, listMenu, lookupStays, messageOf, placeOrder } from './api.js';
+import { initialStayConfirm, orderBinding, stayConfirmReducer } from './stay-confirm.js';
 import { cartReducer, cartSubtotal, emptyCart, unavailableLines } from './cart.js';
 import { resolvePropertyId } from './config.js';
 import { formatPrice, toMinor } from './money.js';
@@ -50,6 +51,7 @@ function Pos({ propertyId }: { propertyId: string }) {
   const [menu, setMenu] = useState<MenuItem[] | null>(null);
   const [cart, dispatchCart] = useReducer(cartReducer, emptyCart);
   const [roomNumber, setRoomNumber] = useState('');
+  const [stay, dispatchStay] = useReducer(stayConfirmReducer, initialStayConfirm);
   const [orderNotes, setOrderNotes] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -103,10 +105,29 @@ function Pos({ propertyId }: { propertyId: string }) {
     [applyMenu],
   );
 
+  const onRoomNumber = useCallback((value: string) => {
+    setRoomNumber(value);
+    // A different room means a different guest: the reducer drops the choice and the tick.
+    dispatchStay({ type: 'roomChanged', room: value });
+  }, []);
+
+  const runLookup = useCallback(
+    async (room: string) => {
+      dispatchStay({ type: 'lookupStarted', room });
+      try {
+        dispatchStay({ type: 'lookupDone', room, response: await lookupStays(propertyId, room) });
+      } catch (error) {
+        dispatchStay({ type: 'lookupFailed', room, message: messageOf(error) });
+      }
+    },
+    [propertyId],
+  );
+
   const onPlaceOrder = useCallback(async () => {
     if (submitting) return; // the button is disabled too; the API has no idempotency key
     const room = roomNumber.trim();
-    if (!room || cart.lines.length === 0) return;
+    const binding = orderBinding(stay);
+    if (!room || cart.lines.length === 0 || !binding) return;
     const estimate = cartSubtotal(cart);
 
     setSubmitting(true);
@@ -122,10 +143,11 @@ function Pos({ propertyId }: { propertyId: string }) {
         })),
         ...(orderNotes.trim() ? { notes: orderNotes.trim() } : {}),
         placedBy: 'pos',
-        unverified: true,
+        ...binding,
       });
       dispatchCart({ type: 'clear' });
       setRoomNumber('');
+      dispatchStay({ type: 'orderPlaced' });
       setOrderNotes('');
       addPlaced(order);
 
@@ -138,12 +160,18 @@ function Pos({ propertyId }: { propertyId: string }) {
       if (repriced) void refreshMenu();
     } catch (error) {
       notify('error', `Order not placed: ${messageOf(error)}`);
+      if (error instanceof ApiError && (error.status === 409 || error.status === 503)) {
+        // The server's stay check failed (stay ended, name not on it, or the lookup works
+        // again): drop the choice, show why, and look the room up again.
+        dispatchStay({ type: 'orderRejected', message: messageOf(error) });
+        void runLookup(room);
+      }
       // 400 usually means an item became unavailable or the menu changed.
       if (error instanceof ApiError && error.status === 400) void refreshMenu();
     } finally {
       setSubmitting(false);
     }
-  }, [submitting, roomNumber, cart, orderNotes, propertyId, addPlaced, notify, refreshMenu]);
+  }, [submitting, roomNumber, stay, cart, orderNotes, propertyId, addPlaced, notify, refreshMenu, runLookup]);
 
   return (
     <AppShell
@@ -178,7 +206,11 @@ function Pos({ propertyId }: { propertyId: string }) {
           cart={cart}
           dispatchCart={dispatchCart}
           roomNumber={roomNumber}
-          onRoomNumber={setRoomNumber}
+          onRoomNumber={onRoomNumber}
+          stay={stay}
+          onFindGuest={() => void runLookup(roomNumber.trim())}
+          onSelectGuest={(reservationId, displayName) => dispatchStay({ type: 'guestSelected', reservationId, displayName })}
+          onToggleUnverified={(confirmed) => dispatchStay({ type: 'unverifiedToggled', confirmed })}
           orderNotes={orderNotes}
           onOrderNotes={setOrderNotes}
           submitting={submitting}

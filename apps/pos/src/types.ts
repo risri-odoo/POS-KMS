@@ -65,15 +65,38 @@ export interface RoomAck {
 }
 
 /** POST /orders body. Deliberately has no price fields: the server prices orders. */
-export interface PlaceOrderBody {
+export type PlaceOrderBody = {
   propertyId: string;
   roomNumber: string;
   items: { menuItemId: string; quantity: number; notes?: string }[];
   notes?: string;
   placedBy: 'pos';
-  /** Until the stay-confirmation screen (Phase 1 step 5): staff orders are sent as unverified. */
-  unverified: true;
+} & (
+  /** The guest staff confirmed from GET /stays/lookup (re-checked by the server). */
+  | { reservationId: string; confirmedGuestName: string }
+  /** Staff ticked the "Unverified" warning (lookup unavailable or not set up). */
+  | { unverified: true }
+);
+
+/** GET /stays/lookup. Guests are first name + surname initial only. */
+export interface PublicGuest {
+  firstName: string;
+  lastInitial: string;
+  displayName: string;
 }
+
+export interface PublicStay {
+  reservationId: string;
+  roomNumber: string;
+  departureDate: string;
+  guests: PublicGuest[];
+}
+
+export type StayLookupResponse =
+  | { status: 'found'; stays: PublicStay[] }
+  | { status: 'none' }
+  | { status: 'unavailable' }
+  | { status: 'not_configured' };
 
 export interface CreateMenuItemBody {
   propertyId: string;

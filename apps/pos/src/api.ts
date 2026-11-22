@@ -5,6 +5,7 @@ import type {
   Order,
   OrderWithItems,
   PlaceOrderBody,
+  StayLookupResponse,
   UpdateMenuItemBody,
 } from './types.js';
 
@@ -67,6 +68,11 @@ export function listOrders(propertyId: string): Promise<Order[]> {
 
 export function placeOrder(body: PlaceOrderBody): Promise<OrderWithItems> {
   return request('/orders', { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** In-house stays for a room, for staff to confirm the guest before ordering. */
+export function lookupStays(propertyId: string, roomNumber: string): Promise<StayLookupResponse> {
+  return request(`/stays/lookup?propertyId=${q(propertyId)}&roomNumber=${q(roomNumber)}`);
 }
 
 export function messageOf(error: unknown): string {

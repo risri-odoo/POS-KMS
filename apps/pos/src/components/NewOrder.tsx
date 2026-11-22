@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type Dispatch } from 'react';
-import { ClipboardList, Minus, Plus } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ClipboardList, Minus, Plus, Search } from 'lucide-react';
 import {
   Button,
   Card,
@@ -21,6 +21,8 @@ import { MAX_QUANTITY, MIN_QUANTITY, cartSubtotal, type CartAction, type CartSta
 import { formatMoney, formatPrice } from '../money.js';
 import { formatAge, groupAvailableMenu } from '../menu.js';
 import type { FeedOrder, MenuItem } from '../types.js';
+import { bindingSummary, orderBinding, type StayConfirmState } from '../stay-confirm.js';
+import { StayConfirm } from './StayConfirm.js';
 
 const CLOCK_TICK_MS = 30_000;
 
@@ -30,6 +32,10 @@ interface Props {
   dispatchCart: Dispatch<CartAction>;
   roomNumber: string;
   onRoomNumber: (v: string) => void;
+  stay: StayConfirmState;
+  onFindGuest: () => void;
+  onSelectGuest: (reservationId: string, displayName: string) => void;
+  onToggleUnverified: (confirmed: boolean) => void;
   orderNotes: string;
   onOrderNotes: (v: string) => void;
   submitting: boolean;
@@ -112,11 +118,19 @@ function CartPanel({
   onOrderNotes,
   submitting,
   onPlaceOrder,
+  stay,
+  onFindGuest,
+  onSelectGuest,
+  onToggleUnverified,
 }: Props) {
   const subtotal = cartSubtotal(cart);
+  const summary = bindingSummary(stay);
+  const room = roomNumber.trim();
   // Disabled while a request is in flight: the API has no idempotency key yet,
-  // so a double tap would otherwise create two orders.
-  const canPlace = cart.lines.length > 0 && roomNumber.trim() !== '' && subtotal.kind !== 'mixed' && !submitting;
+  // so a double tap would otherwise create two orders. A confirmed guest (or a
+  // ticked Unverified warning) is required too.
+  const canPlace =
+    cart.lines.length > 0 && room !== '' && subtotal.kind !== 'mixed' && !submitting && orderBinding(stay) !== null;
 
   return (
     <aside className="order-2 flex flex-col gap-3 rounded-xl bg-white p-4 shadow-sm lg:min-h-0" aria-label="Cart">
@@ -124,17 +138,33 @@ function CartPanel({
 
       <Field label="Room number *">
         {(id) => (
-          <Input
-            id={id}
-            value={roomNumber}
-            onChange={(e) => onRoomNumber(e.target.value)}
-            maxLength={20}
-            inputMode="text"
-            autoComplete="off"
-            className="min-h-11 text-lg! font-semibold"
-          />
+          <div className="flex gap-2">
+            <Input
+              id={id}
+              value={roomNumber}
+              onChange={(e) => onRoomNumber(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && room !== '') onFindGuest();
+              }}
+              maxLength={20}
+              inputMode="text"
+              autoComplete="off"
+              className="min-h-11 text-lg! font-semibold"
+            />
+            <Button
+              variant="secondary"
+              icon={Search}
+              onClick={onFindGuest}
+              disabled={room === '' || stay.phase.kind === 'loading'}
+              className="min-h-11 flex-shrink-0"
+            >
+              Find guest
+            </Button>
+          </div>
         )}
       </Field>
+
+      <StayConfirm state={stay} onSelectGuest={onSelectGuest} onToggleUnverified={onToggleUnverified} onRetry={onFindGuest} />
 
       <ul className="flex flex-col gap-2 lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         {cart.lines.length === 0 && <li className="py-6 text-center text-sm text-telivity-mid-grey">Tap menu items to add them.</li>}
@@ -199,6 +229,27 @@ function CartPanel({
         </span>
       </div>
       <p className="-mt-2 text-xs text-gray-500">Estimate. The server prices the order from the current menu.</p>
+
+      {summary ? (
+        <p
+          data-testid="order-for"
+          className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-semibold text-telivity-navy ${
+            summary.kind === 'verified' ? 'bg-telivity-dark-teal/10' : 'bg-telivity-orange/10'
+          }`}
+        >
+          {summary.kind === 'verified' ? (
+            <CheckCircle2 size={18} className="text-telivity-dark-teal" aria-hidden="true" />
+          ) : (
+            <AlertTriangle size={18} className="text-telivity-orange" aria-hidden="true" />
+          )}
+          <span className="flex-1">{summary.text}</span>
+          <span className={`text-xs ${summary.kind === 'verified' ? 'text-telivity-dark-teal' : 'text-telivity-orange'}`}>
+            {summary.kind === 'verified' ? 'Verified' : 'Not verified'}
+          </span>
+        </p>
+      ) : (
+        room !== '' && <p className="text-xs text-gray-500">Confirm the guest above to place the order.</p>
+      )}
 
       <Button disabled={!canPlace} onClick={onPlaceOrder} className="min-h-12 w-full text-base!">
         {submitting ? 'Placing…' : 'Place order'}
