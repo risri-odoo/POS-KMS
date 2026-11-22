@@ -180,7 +180,11 @@ Anything not read directly in code is marked **(inferred)**.
 3. POS calls **R1** with `channel: staff` and the staff member's id. HAIP applies the same rules; there's no one-time code, because the staff member is the check.
 4. **Match:** as in self-ordering, the order is bound to the stay.
 5. **No phone on file, or a sharer without one:** staff choose **"verify by name"**. R1 with `method: staff_attested` returns occupant display names for that room, with no phones. Staff pick one, and the order is bound to that stay with `verified_by_staff_id`. Whether restaurant staff may see occupant names is a decision (§7, N5).
-6. **HAIP unreachable:** staff can still save the order, marked `unverified`. The kitchen can cook it, but the outbox row parks as `needs_verification` until a manager binds it to a stay, never by room number alone.
+6. **Stay lookup down, or HAIP not configured (decided 2026-11-22):** staff can still save the order.
+   - POS shows a clear **"Unverified"** warning that staff must confirm before placing the order.
+   - The order is saved with `verification_status = 'unverified'` and no stay ids. The kitchen cooks it as normal.
+   - At posting time, the worker tries to verify again. If there is **exactly one** in-house stay in that room, it attaches that stay's ids and posts (§4.8).
+   - Otherwise (no stay, more than one, or the lookup still down), it parks the row as `needs_verification` **without sending**. A manager binds it to a stay; it's never posted by room number alone.
 
 ### 4.4 Sequence
 
@@ -232,6 +236,8 @@ sequenceDiagram
 
 All new columns are nullable, so existing rows keep working. One migration in `PDB/`.
 
+**Phase 1 scope (decided 2026-11-22):** only the `orders` and `haip_post_outbox` changes, plus `verified_guest_name` and `verified_at` on `orders`. `guest_sessions`, `verification_attempts` and `room_qr_codes` are deferred to guest self-ordering (Phase 2). `post_mode` isn't needed in Phase 1, because every post still goes through folio-inbound.
+
 | Table | Change | Notes |
 |---|---|---|
 | `guest_sessions` (new) | `id`, `property_id`, `token_hash` (SHA-256 of a 32-byte random token), `haip_reservation_id`, `haip_folio_id`, `room_number_at_verify`, `guest_display_name`, `channel` (`guest_qr` or `staff`), `verification_method` (`phone`, `phone_otp` or `staff_attested`), `verified_by_staff_id` (nullable), `verified_at`, `expires_at`, `revoked_at`, `revoke_reason`, `last_seen_at`, `created_at` | **No phone column.** Unique index on `token_hash`; index on `(property_id, haip_reservation_id)` for revoking on events |
@@ -275,11 +281,31 @@ All new columns are nullable, so existing rows keep working. One migration in `P
 | Wrong guest | Possible on late posts (§9 S6c) | Impossible: the folio belongs to one reservation, and HAIP refuses non-open folios (`H/folio/folio.service.ts:728-729`) |
 | Legacy rows | n/a | Rows with no stay ids keep `post_mode='room'` and the current guard |
 
-**Interim, buildable on today's HAIP:** post to the stored folio with `POST /pos/charges` (`H/pos/pos.service.ts:19-31`).
-- **Benefit:** no wrong guest.
-- **Gap:** no idempotency. Before retrying an ambiguous failure, check the folio's charges for the `[POS ref <vendorTxnId>]` tag in the description (`H/pos/pos.service.ts:23`). That needs a service principal with `folios.read`.
-- With HAIP `439956d`, the same check can use `GET /folios/charges?folioId=<id>&type=food_beverage` (`H/folio/folio.controller.ts:58-71`), which is still a client-side text match on the description.
-- Alternatively, mark the row `failed` and have a person check, as happens today.
+**Interim until HAIP ships R3 (decided 2026-11-22): keep folio-inbound, with a stay re-check before every attempt.**
+
+Before each post attempt, including retries, the worker asks the `StayLookup`:
+
+| Re-check result | Action |
+|---|---|
+| Stored stay is in-house, and it's the **only** in-house stay in its current room | Post through `POST /folio-inbound/charges` with the same `vendorTxnId` and the stay's **current** room number. A room move is followed |
+| Stay ended, or not found | Park as `stay_ended` **without sending** |
+| More than one in-house stay in that room | Park as `needs_verification` **without sending**. Folio-inbound would pick one of them arbitrarily (`H/folio-inbound/folio-inbound.service.ts:56-66`) |
+| Lookup unavailable | Retry later; nothing is sent |
+| Order is `unverified` (no stay ids) | Same check by room: exactly one in-house stay means attach its ids and post; otherwise park as `needs_verification` (§4.3 step 6) |
+
+**Why not `POST /pos/charges` to the stored folio yet:**
+- It has **no idempotency**. `reference` only goes into the description (`H/pos/pos.service.ts:19-31`). `postCharge` is a plain insert (`H/folio/folio.service.ts:713-746`).
+- The `charges` table's unique `(property, folio, source_key)` index isn't reachable from the POS DTO (`HDB/schema/folio.ts:116,130-131`).
+- So a retry after a lost response would double-charge.
+
+| | `/pos/charges` + retry only when never sent | **folio-inbound + re-check (chosen)** |
+|---|---|---|
+| Double charge | Possible if a failure is misclassified; every timeout or 5xx needs a person | Impossible: unique `vendorTxnId` |
+| Wrong guest | Impossible: closed folios are refused | Only if the stay ends **and** the room is re-let between the re-check and HAIP's lookup (milliseconds). Two stays in one room are parked, not posted |
+
+**Remaining risk:** the re-check-to-post window above. It's closed when HAIP ships R3, after which POS posts by `reservationId` + `folioId`.
+
+**Suggestion for HAIP:** expose `source_key` on `/pos/charges`, or pass `vendorTxnId` into it. The unique index already exists, so R3 could be small.
 
 ### 4.9 Checkout, room moves, cancellations and refunds
 
@@ -311,7 +337,7 @@ All new columns are nullable, so existing rows keep working. One migration in `P
 | Room QR generation and rotation (admin screen) | |
 | Orders carry stay ids; outbox copies them; `parked_reason` column replaces the text-match guard | Fixes the guard's fail-open problem (`AUDIT.md` §9) |
 | Worker: re-check before posting; post to folio through the interface; legacy `room` mode for old rows | |
-| Interim posting through `POST /pos/charges` to the stored folio (§4.8) | Real HAIP, no new endpoint; removes the wrong-guest risk |
+| Interim posting through folio-inbound, with a stay re-check and a one-stay-per-room check before every attempt (§4.8) | Real HAIP, no new endpoint; keeps duplicate protection and closes most of the wrong-guest risk |
 | Webhook receiver (signature check, `X-HAIP-Event-Id` dedupe) for `checked_in`, `room_moved`, `checked_out` | Works with today's payloads; maps `roomId` with the stay data |
 | Contract tests: the Fake adapter must match the specs in §5.2 | So switching adapters is low-risk |
 
@@ -407,7 +433,7 @@ All requests below are under the API key surface (`ApiKeyGuard` + `ConnectScopeG
 |---|---|
 | Production verification without copying phones into POS | R1 (R1b/c for the one-time code) |
 | Cheap stay re-check before each order and post | R2 (or the service principal fallback) |
-| Idempotent post-to-stay | R3 (interim: `/pos/charges` plus manual checks) |
+| Idempotent post-to-stay | R3 (interim: folio-inbound with a stay re-check, §4.8) |
 | POS voids | R4 (or a service principal with `folios.manage`, broad) |
 | Automatic reconciliation | R5 + R6 |
 | Front-desk warning at checkout | R7 |
@@ -421,10 +447,23 @@ Rough estimates for one POS developer; HAIP effort is a guess for their team.
 | Phase | Scope | POS effort | HAIP dependency |
 |---|---|---|---|
 | **0. Foundations** | Interface + Fake adapter, migration (§4.5), `parked_reason`, worker re-check and folio posting through the interface, contract tests | 1–1.5 weeks | None |
-| **1. Stop wrong-guest posts on real HAIP** | Bind staff orders to a stay with the StaffRest adapter (demo/pilot only), post through `/pos/charges` to the stored folio | 3–5 days | Service principal setup (Keycloak client, `integration:link`); **no code** |
+| **1. Stop wrong-guest posts on real HAIP** | Steps below, agreed 2026-11-22. Staff orders bound to a stay (with an unverified fallback), posting through folio-inbound with a stay re-check, then the StaffRest adapter (demo/pilot only) | About 8–10 days | Service principal on local HAIP/Keycloak for dev, set up by the user; production principal from the HAIP team; **no HAIP code** |
 | **2. Guest self-ordering** | QR landing, phone entry, sessions, rate limits, guest web app, webhook receiver for revocation | 1.5–2 weeks | R1 + R2 (HAIP: about S–M) |
 | **3. Hardening** | One-time code, R3 idempotent posting, R4 voids, R5/R6 reconciliation, checkout warning, staff login + KMS socket auth | 2–3 weeks | R1b/c, R3–R7; Keycloak POS roles |
 | **4. Optional** | "Order food" deep link with a stay token in the welcome message (option c) | 3–5 days | Stay-token issue + introspection |
+
+**Phase 1 steps** (one commit each, with review before each):
+
+| Step | What | Effort |
+|---|---|---|
+| 0 | Record these decisions (this update) | — |
+| 1 | `StayLookup` interface (`findInHouseByRoom`, `getStay`) + fake HAIP + shared contract tests | 0.5–1 day |
+| 2 | Migration: stay ids, `verification_status`, `verified_guest_name`, `verified_at` on `orders`; stay ids and `parked_reason` on `haip_post_outbox`; backfill `parked_reason` for existing parked rows | 1 day |
+| 3 | Retry guard reads `parked_reason` instead of matching HAIP's error text | 0.5 day |
+| 4 | Staff flow API: `GET /stays/lookup`; `POST /orders` with an optional `reservationId` (re-checked by the server) or as `unverified` | 1–1.5 days |
+| 5 | Staff flow screen: Find guest → confirm first name → Place order; "Unverified" warning that staff must confirm | 1–1.5 days |
+| 6 | Worker re-check before each attempt (§4.8), including re-verifying `unverified` orders | 1–1.5 days |
+| 7 | Real `StayLookup` adapter over HAIP staff REST with a service principal (local dev setup first) | 2 days + setup |
 
 **Risks**
 
