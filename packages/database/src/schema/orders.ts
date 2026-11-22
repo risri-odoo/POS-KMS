@@ -10,6 +10,9 @@ export const orderStatus = pgEnum('order_status', [
   'cancelled',
 ]);
 
+/** Whether staff bound the order to a HAIP stay when it was placed. Null for orders from before Phase 1. */
+export const verificationStatus = pgEnum('verification_status', ['verified', 'unverified']);
+
 export const orders = pgTable(
   'orders',
   {
@@ -24,6 +27,13 @@ export const orders = pgTable(
     placedBy: varchar('placed_by', { length: 100 }),
     deliveredAt: timestamp('delivered_at', { withTimezone: true }),
     cancelledAt: timestamp('cancelled_at', { withTimezone: true }),
+    // The HAIP stay this order is for (INTEGRATION_DESIGN.md §4.5). Room number stays the delivery room.
+    haipReservationId: uuid('haip_reservation_id'),
+    haipFolioId: uuid('haip_folio_id'),
+    verificationStatus: verificationStatus('verification_status'),
+    // First name + last initial the staff member confirmed with the guest, e.g. "Ada L.". Nothing more.
+    verifiedGuestName: varchar('verified_guest_name', { length: 120 }),
+    verifiedAt: timestamp('verified_at', { withTimezone: true }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
