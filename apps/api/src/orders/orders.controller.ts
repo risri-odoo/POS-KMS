@@ -11,7 +11,15 @@ export class OrdersController {
   @Post()
   @ApiOperation({ summary: 'Place a room-service order (priced server-side from the menu)' })
   @ApiResponse({ status: 201, description: 'The order with its item snapshots' })
-  @ApiResponse({ status: 400, description: 'Unknown/unavailable item or mixed currencies' })
+  @ApiResponse({
+    status: 400,
+    description: 'Unknown/unavailable item, mixed currencies, or neither a confirmed stay nor unverified: true',
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Stay no longer in-house in that room, guest name not on the stay, no in-house guest, or unverified while the lookup works',
+  })
+  @ApiResponse({ status: 503, description: 'HAIP unreachable while checking the stay: retry, or place as unverified' })
   create(@Body() dto: CreateOrderDto) {
     return this.ordersService.create(dto);
   }

@@ -85,7 +85,7 @@ async function waitOutbox(orderId, pred, timeoutMs = 60_000) {
 const brief = (row) => row && ({ status: row.status, attempts: row.attempts, lastError: row.lastError, haipChargeId: row.haipChargeId, vendorTxnId: row.vendorTxnId, timedOut: row.timedOut });
 
 async function order(room) {
-  const r = await http('POST', `${POS}/orders`, { propertyId: PROP, roomNumber: room, items: [{ menuItemId, quantity: 1 }], placedBy: 'live-run' });
+  const r = await http('POST', `${POS}/orders`, { propertyId: PROP, roomNumber: room, items: [{ menuItemId, quantity: 1 }], placedBy: 'live-run', unverified: true });
   if (r.status !== 201) throw new Error(`order ${room}: ${r.status} ${JSON.stringify(r.body)}`);
   return r.body.id;
 }

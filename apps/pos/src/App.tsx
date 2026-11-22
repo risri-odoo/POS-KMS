@@ -122,6 +122,7 @@ function Pos({ propertyId }: { propertyId: string }) {
         })),
         ...(orderNotes.trim() ? { notes: orderNotes.trim() } : {}),
         placedBy: 'pos',
+        unverified: true,
       });
       dispatchCart({ type: 'clear' });
       setRoomNumber('');

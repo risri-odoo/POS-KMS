@@ -71,6 +71,8 @@ export interface PlaceOrderBody {
   items: { menuItemId: string; quantity: number; notes?: string }[];
   notes?: string;
   placedBy: 'pos';
+  /** Until the stay-confirmation screen (Phase 1 step 5): staff orders are sent as unverified. */
+  unverified: true;
 }
 
 export interface CreateMenuItemBody {

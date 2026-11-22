@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { ConflictException } from '@nestjs/common';
-import { haipPostOutbox } from '@stayx/database';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { haipPostOutbox, orders } from '@stayx/database';
+import { FakeStayLookup } from '../haip/fake-stay-lookup.js';
+import { NotConfiguredStayLookup } from '../haip/stay-lookup.js';
 import { OrdersService, type Order, type OrderWithItems } from './orders.service.js';
 import type { Db } from '../database/database.module.js';
 import type { MenuService } from '../menu/menu.service.js';
@@ -12,11 +14,14 @@ const PROPERTY_ID = '11111111-1111-4111-8111-111111111111';
 const ORDER_ID = '33333333-3333-4333-8333-333333333333';
 const OUTBOX_ID = '55555555-5555-4555-8555-555555555555';
 
-const dto: CreateOrderDto = {
+// A plain object (not a CreateOrderDto instance), so tests can spread it.
+const dto = {
   propertyId: PROPERTY_ID,
   roomNumber: '1204',
   items: [{ menuItemId: '44444444-4444-4444-8444-444444444444', quantity: 1 }],
-};
+  // Required since Phase 1 step 4; the service is built with the not-configured lookup.
+  unverified: true,
+} satisfies CreateOrderDto;
 
 const createdOrder = { id: ORDER_ID, propertyId: PROPERTY_ID, status: 'placed', items: [] } as unknown as OrderWithItems;
 const updatedRow = { id: ORDER_ID, propertyId: PROPERTY_ID, status: 'accepted' } as unknown as Order;
@@ -79,7 +84,76 @@ describe('OrdersService', () => {
       {} as MenuService,
       events as unknown as OrderEventsService,
       queue as unknown as HaipQueue,
+      new NotConfiguredStayLookup(),
     );
+  });
+
+  describe('create: stay binding', () => {
+    const menu = { findByIds: vi.fn().mockResolvedValue([
+      { id: dto.items[0]!.menuItemId, propertyId: PROPERTY_ID, name: 'Tea', price: '5.00', currencyCode: 'USD', isAvailable: true },
+    ]) };
+
+    /** Runs the real transaction callback against a fake tx and records what is inserted into orders. */
+    function capturingDb() {
+      const inserted: Record<string, unknown>[] = [];
+      const tx = {
+        insert: (table: unknown) => ({
+          values: (v: Record<string, unknown> | Record<string, unknown>[]) => ({
+            returning: () => {
+              if (table === orders) {
+                inserted.push(v as Record<string, unknown>);
+                return Promise.resolve([{ id: ORDER_ID, ...(v as Record<string, unknown>) }]);
+              }
+              return Promise.resolve([]);
+            },
+          }),
+        }),
+      };
+      const capture = { transaction: vi.fn((cb: (t: unknown) => unknown) => cb(tx)), insert: vi.fn() };
+      return { capture, inserted };
+    }
+
+    it('writes the confirmed stay, folio and guest name onto the order', async () => {
+      const lookup = new FakeStayLookup([
+        {
+          propertyId: PROPERTY_ID,
+          reservationId: '66666666-6666-4666-8666-666666666666',
+          status: 'checked_in',
+          roomNumber: '1204',
+          departureDate: '2026-12-01',
+          guestFolioId: '77777777-7777-4777-8777-777777777777',
+          occupants: [{ firstName: 'Ada', lastInitial: 'L' }],
+        },
+      ]);
+      const { capture, inserted } = capturingDb();
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, lookup);
+
+      await svc.create({ ...dto, unverified: undefined, reservationId: '66666666-6666-4666-8666-666666666666', confirmedGuestName: 'Ada L.' });
+
+      expect(inserted[0]).toMatchObject({
+        roomNumber: '1204',
+        haipReservationId: '66666666-6666-4666-8666-666666666666',
+        haipFolioId: '77777777-7777-4777-8777-777777777777',
+        verificationStatus: 'verified',
+        verifiedGuestName: 'Ada L.',
+      });
+      expect(inserted[0]!['verifiedAt']).toBeInstanceOf(Date);
+    });
+
+    it('writes an unverified order with no stay ids', async () => {
+      const { capture, inserted } = capturingDb();
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup());
+
+      await svc.create(dto);
+
+      expect(inserted[0]).toMatchObject({ verificationStatus: 'unverified', haipReservationId: null, haipFolioId: null, verifiedGuestName: null });
+    });
+
+    it('a rejected binding writes nothing and emits nothing', async () => {
+      await expect(service.create({ ...dto, unverified: undefined })).rejects.toBeInstanceOf(BadRequestException);
+      expect(db.transaction).not.toHaveBeenCalled();
+      expect(events.emitOrderCreated).not.toHaveBeenCalled();
+    });
   });
 
   describe('create: event emission', () => {

@@ -69,6 +69,25 @@ export class CreateOrderDto {
   @IsString()
   @MaxLength(100)
   placedBy?: string;
+
+  @ApiPropertyOptional({ description: 'HAIP reservation from GET /stays/lookup. Re-checked by the server.' })
+  @IsOptional()
+  @IsUUID()
+  reservationId?: string;
+
+  @ApiPropertyOptional({ example: 'Ada L.', description: 'The guest staff confirmed, as shown by the lookup. Required with reservationId.' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  confirmedGuestName?: string;
+
+  @ApiPropertyOptional({
+    enum: [true],
+    description: 'Staff confirmed the "Unverified" warning. Only accepted when the stay lookup is unavailable or not configured.',
+  })
+  @IsOptional()
+  @IsIn([true])
+  unverified?: true;
 }
 
 export class ListOrdersDto {

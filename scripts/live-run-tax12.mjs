@@ -70,7 +70,7 @@ try {
     haipCharges: chargesFor(t12),
   });
 
-  const o = await http('POST', `${POS}/orders`, { propertyId: PROP, roomNumber: '210', items: [{ menuItemId, quantity: 1 }], placedBy: 'live-run-tax12' });
+  const o = await http('POST', `${POS}/orders`, { propertyId: PROP, roomNumber: '210', items: [{ menuItemId, quantity: 1 }], placedBy: 'live-run-tax12', unverified: true });
   for (const status of ['accepted', 'preparing', 'ready', 'delivered']) await http('PATCH', `${POS}/orders/${o.body.id}/status?propertyId=${PROP}`, { status });
   let row;
   for (let i = 0; i < 60; i++) {

@@ -172,6 +172,9 @@ What POS needs but can't get today:
 8. **Role guard** (M): restaurant staff / kitchen / manager / admin, mapped per route. `outbox/resolve` and menu edits for manager+ only.
 9. **Socket auth** (S): require the JWT on the handshake; check property membership on `joinProperty`.
 10. **UI login** (M): OIDC PKCE in `apps/pos` and `apps/kms`, sending the bearer token on fetch and the socket.
+   - **Must happen before production because of the guest lookup (added 2026-11-22, Phase 1 step 4):** `GET /api/v1/stays/lookup` returns in-house guests' first names and surname initials by room, and it is unauthenticated like the rest of the API. Anyone who can reach the API could walk room numbers to list guests. Items 7–10 must put it behind staff login (and item 8 limit it to restaurant staff).
+   - **Stopgap only:** a per-IP limit of 30 lookups per minute (`STAY_LOOKUP_RATE_LIMIT_MAX`, `..._WINDOW_MS`). Counts are in memory and per process, and keyed by the socket address, so behind a proxy all clients share one limit.
+   - **Same exposure on the kitchen socket:** order payloads now include `verifiedGuestName` (for example "Ada L."), and the socket has no auth either (item 9).
 11. **Hardening** (S): gate Swagger outside dev, rate limiting, `/health`, no default DB credentials outside dev.
 
 **C. Correctness**
@@ -188,6 +191,7 @@ What POS needs but can't get today:
 20. **Frontend component tests** (M): set up `jsdom` and Testing Library (new dev packages, not installed yet). First test: a sticky toast stays until dismissed. A POS success toast disappeared once in a scripted browser run on 2026-11-05. It didn't happen again in three further runs and is assumed to be an outside click on that browser.
 21. **Test KMS on a real kitchen tablet** (S): readability, beep volume, and how many tickets fit per column.
 22. **Compact ticket mode** (M, if needed): consider it if a busy kitchen scrolls too much. About two tickets fit per column at 1024×768.
+23. **Migrate `stayx_pos_live` before the next live run** (S): it has only migration `0000`, so the API's queries on the Phase 1 columns fail against it. Back it up first. The live-run scripts now send `unverified: true` and expect `HAIP_STAY_LOOKUP` unset.
 
 ---
 

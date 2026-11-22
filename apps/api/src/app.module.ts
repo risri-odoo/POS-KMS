@@ -7,9 +7,10 @@ import { HaipModule } from './haip/haip.module.js';
 import { MenuModule } from './menu/menu.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { OutboxModule } from './outbox/outbox.module.js';
+import { StaysModule } from './stays/stays.module.js';
 
 @Module({
-  imports: [DatabaseModule, EventsModule, HaipModule, MenuModule, OrdersModule, OutboxModule],
+  imports: [DatabaseModule, EventsModule, HaipModule, MenuModule, OrdersModule, OutboxModule, StaysModule],
   controllers: [AppController],
   providers: [AppService],
 })

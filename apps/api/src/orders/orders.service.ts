@@ -13,7 +13,9 @@ import { MenuService } from '../menu/menu.service.js';
 import { OrderEventsService } from '../events/order-events.service.js';
 import { vendorTxnIdFor } from '../haip/charge-mapper.js';
 import { HaipQueue } from '../haip/haip-queue.service.js';
+import { STAY_LOOKUP, type StayLookup } from '../haip/stay-lookup.js';
 import { canTransition, type OrderStatus } from './order-status.js';
+import { resolveStayBinding, type StayBinding } from './stay-binding.js';
 import { generateOrderNumber, priceOrder } from './order-pricing.js';
 import type { CreateOrderDto, ListOrdersDto } from './dto/order.dto.js';
 
@@ -41,15 +43,19 @@ export class OrdersService {
     private readonly menuService: MenuService,
     private readonly orderEvents: OrderEventsService,
     private readonly haipQueue: HaipQueue,
+    @Inject(STAY_LOOKUP) private readonly stayLookup: StayLookup,
   ) {}
 
   async create(dto: CreateOrderDto): Promise<OrderWithItems> {
+    // Which stay the order is for, checked with HAIP before anything is written.
+    const binding = await resolveStayBinding(this.stayLookup, dto);
+
     // A random 4-char suffix can collide within a day; the unique index catches
     // it and we retry the whole transaction with a fresh number.
     let order: OrderWithItems;
     for (let attempt = 1; ; attempt++) {
       try {
-        order = await this.insertOrder(dto, generateOrderNumber());
+        order = await this.insertOrder(dto, binding, generateOrderNumber());
         break;
       } catch (error) {
         if (attempt < MAX_ORDER_NUMBER_ATTEMPTS && isUniqueViolation(error, ORDER_NUMBER_UNIQUE)) continue;
@@ -61,7 +67,7 @@ export class OrdersService {
     return order;
   }
 
-  private insertOrder(dto: CreateOrderDto, orderNumber: string): Promise<OrderWithItems> {
+  private insertOrder(dto: CreateOrderDto, binding: StayBinding, orderNumber: string): Promise<OrderWithItems> {
     return this.db.transaction(async (tx) => {
       const ids = [...new Set(dto.items.map((i) => i.menuItemId))];
       const menu = await this.menuService.findByIds(ids, dto.propertyId, tx as unknown as Db);
@@ -79,6 +85,7 @@ export class OrdersService {
           currencyCode: priced.currencyCode,
           notes: dto.notes,
           placedBy: dto.placedBy,
+          ...binding,
         })
         .returning();
 
