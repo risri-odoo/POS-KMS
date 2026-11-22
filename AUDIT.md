@@ -1,7 +1,7 @@
 # StayX POS + KMS — Audit against the HSM + POS + KMS spec
 
 Originally audited: `pos/` at commit `a748f97`, 2026-10-25. HAIP read at `cb8d140`, read-only.
-Last updated 2026-11-05: `pos/` `main` after UI merge `9c6e07b`, HAIP at `928c2f6` (§11). §9 and §10 are dated run records and keep the versions they ran on.
+Last updated 2026-11-22: HAIP at `439956d` (§14). POS code unchanged since UI merge `9c6e07b` (2026-11-05). §9 and §10 are dated run records and keep the versions they ran on.
 Spec: `../HSM+POS+KMS.pdf` (the brief said `./docs/HSM_POS_KMS.pdf`; no `docs/` folder exists).
 Method: code reading with `file:line` evidence. Nothing was run, migrated, installed or started for the original audit.
 "Verified" below means "read in code", unless it points to the live runs in §9 and §10.
@@ -367,3 +367,49 @@ POS and KMS now match HAIP's staff dashboard through a shared package, `packages
 - **Behaviour:** API calls and order, cart and board logic are unchanged. KMS Cancel now uses a styled confirm modal, with the same confirm step.
 - **Checked on 2026-11-05:** both apps loaded on the new ports against the real POS API with the HAIP bridge off, and got 200s with the right CORS origin plus a live socket. The demo property had no active orders, so tickets were only seen with mock data.
 - **Not yet tested:** a real kitchen tablet (§7 items 21 and 22) and React component tests (§7 item 20).
+
+---
+
+## 13. HAIP update (928c2f6 → 83f88e5)
+
+Reviewed on 2026-11-12 as part of the integration design; see `INTEGRATION_DESIGN.md`.
+- **What changed:** generic OIDC login, service-principal docs, a guest stays endpoint and migrations 0031–0032.
+- **Effect on POS:** none on the bridge. The integration modules were unchanged.
+
+---
+
+## 14. HAIP update (83f88e5 → 439956d)
+
+Reviewed on 2026-11-22 by reading `git log` and `git diff 83f88e5..439956d` in `haip` (8 commits), plus read-only checks of the containers and database. Nothing was changed or started.
+
+**Rebuild and migration**
+- `haip-init` exited 0 at 2026-11-22 08:08 UTC and applied `0033_rooms_status_changed_at.sql`. `schema_migrations` shows 0031–0033, with 0033 applied at 08:08:01 UTC.
+- The init log has a harmless notice: "column status_changed_at already exists, skipping". `push-schema.ts` creates the column first, then the migration's `ADD COLUMN IF NOT EXISTS` skips it.
+- The `haip-api` image was built 2026-11-22 08:07 UTC.
+
+**Unchanged since `83f88e5`:** `modules/folio-inbound/`, `pos/`, `reservation/`, `connect/`, `webhook/`, `guest-check-in/`, `guest/`, `auth/`, `keycloak/`, `migration-runner.ts` and `integration-principal.ts`.
+- **POS bridge:** no change.
+- **Retry guard:** still valid. HAIP's "is vacant or has no in-house reservation" text is unchanged (`folio-inbound.service.ts:69`).
+- **Posting by folio:** still safe. Non-open folios are still refused (`folio.service.ts:728-729`).
+- **`connect_credentials`:** still missing from `push-schema.ts` (Q10 open).
+
+**New: property-wide charge ledger** `GET /api/v1/folios/charges` (`folio.controller.ts:58-71`, `dto/list-property-charges.dto.ts`, `folio.service.ts:1129-1228`)
+
+| Question | Answer |
+|---|---|
+| Auth | Staff or service-principal JWT with `folios.read`. **Not** usable with the POS API key |
+| Filters | `propertyId` (required), `type`, `from`/`to` (service date), `folioId`, `reversalsOnly`, `page`, `limit` (max 100) |
+| Find a charge by `vendorTxnId`? | **No.** No `vendorTxnId` or text filter, and no join to `folio_inbound_posts`. POS can only match on the description client-side ("Room service RS-… (n item lines)") |
+| Helps reconciliation? | **Partly.** A nightly job could pull the day's `food_beverage` charges, including reversals, and match them to `posted` outbox rows. That needs a service principal, and the `byCurrency` totals cover the returned page only, not the whole window |
+| Q5 / R5 | Q5 partly helped. R5 (lookup by `vendorTxnId` with the API key) is still needed |
+
+**Tax (Q6): not fixed.**
+- **What changed:** profile and rule changes are now written to `audit_logs`, with the acting user (`tax.service.ts`, `writeAudit`).
+- **Profile selection unchanged:** `getActiveTaxProfile` still takes the first active profile with no ordering or tie-break (`tax.service.ts:217-229`).
+- **Local data:** the demo property still has two active profiles (Miami Beach and Barcelona) and no `food_beverage` rule. No `LIVE_FB` test rules remain from §9 or §10.
+
+**Room status:** records `status_changed_at` (migration 0033) and an audit row for each change. A new `GET /rooms/status-history` needs `rooms.read`. Transition rules and room assignment are unchanged, so there's no effect on charge routing.
+
+**Other changes, none affecting POS:** admin role de-duplication (seed and roles service), email template overrides, rate-plan and rate-override reports, property settings merge, and a night-audit `mode` field accepted from cron. The service doesn't branch on it (`night-audit/dto/run-audit.dto.ts`).
+
+**`INTEGRATION_DESIGN.md`:** none of R1–R8 is delivered. The Q5 and Q6 statuses and the shifted `folio.service.ts` / `folio.controller.ts` line citations are updated there.
