@@ -7,7 +7,6 @@ import type { HaipQueue } from './haip-queue.service.js';
 import type { HaipConfig } from './haip.config.js';
 import type { OutboxProcessor } from './outbox.processor.js';
 import type { Db } from '../database/database.module.js';
-import { HAIP_NO_IN_HOUSE_TEXT } from './no-in-house-guard.js';
 
 /** Fake db for the sweep query: records the WHERE and returns `due`. */
 function fakeDb(due: { id: string }[]) {
@@ -45,15 +44,15 @@ describe('OutboxWorker.sweep', () => {
     expect(enqueue.mock.calls).toEqual([['a'], ['b']]);
   });
 
-  it('only selects due pending rows that were not parked for no in-house guest', async () => {
+  it('only selects due pending rows with no parked reason (never auto-retries any parked row)', async () => {
     const { worker, calls } = make([]);
     await worker.sweep();
 
     const { sql, params } = new PgDialect().sqlToQuery(calls.where!);
     expect(sql).toContain('"haip_post_outbox"."status" = $1');
-    expect(sql).toContain('"haip_post_outbox"."last_error" is null or "haip_post_outbox"."last_error" not like');
+    expect(sql).toContain('"haip_post_outbox"."parked_reason" is null');
     expect(params).toContain('pending');
-    expect(params).toContain(`%${HAIP_NO_IN_HOUSE_TEXT}%`);
+    expect(sql).not.toContain('last_error');
   });
 
   it('a db error is logged and returns 0 instead of throwing', async () => {

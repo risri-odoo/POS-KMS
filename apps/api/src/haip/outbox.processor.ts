@@ -6,7 +6,7 @@ import { buildInboundCharge } from './charge-mapper.js';
 import { HaipClient } from './haip-client.js';
 import { HAIP_CONFIG, type HaipConfig } from './haip.config.js';
 import { HAIP_JOB_ATTEMPTS, backoffDelayMs, type HaipJobData } from './haip-queue.service.js';
-import { NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError } from './no-in-house-guard.js';
+import { NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError, reasonForRejection } from './no-in-house-guard.js';
 
 export const HAIP_CLIENT = Symbol('HAIP_CLIENT');
 
@@ -48,16 +48,22 @@ export class OutboxProcessor {
     // Idempotent: posted, resolved or parked rows are never sent again.
     if (!row || row.status !== 'pending') return 'skipped';
 
-    // Belt and braces: retry and the sweeper already exclude these rows, but a
-    // row put back to pending by hand must still never be re-sent.
-    if (isNoInHouseGuestError(row.lastError)) {
+    // Belt and braces: Retry clears the reason and the sweeper skips rows that
+    // have one, so a pending row with a reason was set back by hand. Never send it.
+    if (row.parkedReason) {
       await this.finish(row, { status: 'needs_attention', nextRetryAt: null });
+      this.logger.warn(`Not sending ${row.vendorTxnId}: parked (${row.parkedReason})`);
+      return 'needs_attention';
+    }
+    // Same for a row reset by hand before parked_reason existed (the backfill only tagged parked rows).
+    if (isNoInHouseGuestError(row.lastError)) {
+      await this.finish(row, { status: 'needs_attention', nextRetryAt: null, parkedReason: 'no_in_house_guest' });
       this.logger.warn(`Not re-posting ${row.vendorTxnId}: room had no in-house guest`);
       return 'needs_attention';
     }
 
     if (!this.config.propertyId || row.propertyId !== this.config.propertyId) {
-      await this.finish(row, { status: 'needs_attention', lastError: WRONG_PROPERTY_ERROR });
+      await this.finish(row, { status: 'needs_attention', lastError: WRONG_PROPERTY_ERROR, parkedReason: 'wrong_property' });
       return 'needs_attention';
     }
 
@@ -93,13 +99,15 @@ export class OutboxProcessor {
 
       case 'rejected':
         // A human must fix it (room not in-house, validation, bad key). HAIP
-        // rolled back, so a later manual retry is safe, except when the room had
-        // no in-house guest: that row is resolve-only (see no-in-house-guard.ts).
+        // rolled back, so a manual retry is safe for haip_rejected. A room with
+        // no in-house guest is resolve-only (see no-in-house-guard.ts).
         const rejection = `HAIP rejected (${result.status}): ${result.message}`;
+        const reason = reasonForRejection(result.message);
         await this.finish(row, {
           status: 'needs_attention',
           attempts,
-          lastError: isNoInHouseGuestError(result.message) ? `${NO_IN_HOUSE_GUEST_PREFIX}. ${rejection}` : rejection,
+          lastError: reason === 'no_in_house_guest' ? `${NO_IN_HOUSE_GUEST_PREFIX}. ${rejection}` : rejection,
+          parkedReason: reason,
           nextRetryAt: null,
         });
         this.logger.warn(`HAIP rejected ${row.vendorTxnId}: ${result.message}`);

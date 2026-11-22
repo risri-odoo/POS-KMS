@@ -1,6 +1,15 @@
 import { describe, it, expect } from 'vitest';
 import { PgDialect } from 'drizzle-orm/pg-core';
-import { HAIP_NO_IN_HOUSE_TEXT, NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError, repostAllowed } from './no-in-house-guard.js';
+import {
+  HAIP_NO_IN_HOUSE_TEXT,
+  NO_IN_HOUSE_GUEST_PREFIX,
+  autoPostAllowed,
+  isNoInHouseGuestError,
+  isResolveOnly,
+  manualRetryAllowed,
+  reasonForRejection,
+  resolveOnlyMessage,
+} from './no-in-house-guard.js';
 
 describe('isNoInHouseGuestError', () => {
   it('matches the lastError the processor writes now', () => {
@@ -26,11 +35,47 @@ describe('isNoInHouseGuestError', () => {
   });
 });
 
-describe('repostAllowed', () => {
-  it('lets NULL lastError through and excludes the no-in-house text', () => {
-    const { sql, params } = new PgDialect().sqlToQuery(repostAllowed());
-    // NULL must be explicit: `NULL NOT LIKE x` is NULL, which would drop clean rows.
-    expect(sql).toBe('("haip_post_outbox"."last_error" is null or "haip_post_outbox"."last_error" not like $1)');
-    expect(params).toEqual([`%${HAIP_NO_IN_HOUSE_TEXT}%`]);
+describe('autoPostAllowed (sweeper)', () => {
+  it('only lets rows with no parked reason through', () => {
+    const { sql, params } = new PgDialect().sqlToQuery(autoPostAllowed());
+    expect(sql).toBe('"haip_post_outbox"."parked_reason" is null');
+    expect(params).toEqual([]);
+  });
+});
+
+describe('manualRetryAllowed (Retry)', () => {
+  it('lets rows with no reason or haip_rejected through', () => {
+    const { sql, params } = new PgDialect().sqlToQuery(manualRetryAllowed());
+    // NULL must be explicit: `NULL = x` is NULL, which would drop rows with no reason.
+    expect(sql).toBe('("haip_post_outbox"."parked_reason" is null or "haip_post_outbox"."parked_reason" = $1)');
+    expect(params).toEqual(['haip_rejected']);
+  });
+});
+
+describe('isResolveOnly', () => {
+  it.each(['no_in_house_guest', 'stay_ended', 'needs_verification', 'wrong_property'] as const)('%s is resolve-only', (reason) => {
+    expect(isResolveOnly(reason)).toBe(true);
+  });
+
+  it.each([null, undefined, 'haip_rejected'] as const)('%j is not resolve-only', (reason) => {
+    expect(isResolveOnly(reason)).toBe(false);
+  });
+});
+
+describe('reasonForRejection', () => {
+  it('maps HAIP’s no-in-house text to no_in_house_guest', () => {
+    expect(reasonForRejection(`HTTP 400: Room 110 ${HAIP_NO_IN_HOUSE_TEXT}`)).toBe('no_in_house_guest');
+  });
+
+  it('maps any other rejection to haip_rejected', () => {
+    expect(reasonForRejection('HTTP 422: amount must be positive')).toBe('haip_rejected');
+    expect(reasonForRejection('HTTP 400: Room 999 not found in this property')).toBe('haip_rejected');
+  });
+});
+
+describe('resolveOnlyMessage', () => {
+  it('names the reason and tells staff to resolve in HAIP', () => {
+    expect(resolveOnlyMessage('stay_ended')).toMatch(/stay had ended.*resolve it here/);
+    expect(resolveOnlyMessage('no_in_house_guest')).toMatch(/no in-house guest.*resolve it here/);
   });
 });

@@ -77,34 +77,45 @@ describe('OutboxService', () => {
       const result = await service.retry(OUTBOX_ID, PROPERTY_ID);
 
       expect(result.status).toBe('pending');
-      expect(calls.set).toMatchObject({ status: 'pending', attempts: 0, lastError: null, nextRetryAt: null });
+      expect(calls.set).toMatchObject({ status: 'pending', attempts: 0, lastError: null, nextRetryAt: null, parkedReason: null });
       expect(enqueue).toHaveBeenCalledExactlyOnceWith(OUTBOX_ID);
     });
 
-    it('puts the no-in-house guard in the UPDATE itself (atomic, not check-then-act)', async () => {
+    it('allows a haip_rejected row (bad data, fixed by staff) and clears its parked reason', async () => {
+      const { service, calls } = make({ updateMatches: true, existing: row({ parkedReason: 'haip_rejected' }) });
+
+      const result = await service.retry(OUTBOX_ID, PROPERTY_ID);
+
+      expect(calls.set).toMatchObject({ status: 'pending', parkedReason: null });
+      expect(result.parkedReason).toBeNull();
+      expect(enqueue).toHaveBeenCalledExactlyOnceWith(OUTBOX_ID);
+    });
+
+    it('puts the parked-reason guard in the UPDATE itself (atomic, not check-then-act)', async () => {
       const { service, calls } = make({ updateMatches: true, existing: row() });
       await service.retry(OUTBOX_ID, PROPERTY_ID);
 
       const { sql, params } = render(calls.where);
-      expect(sql).toContain('"haip_post_outbox"."last_error" is null or "haip_post_outbox"."last_error" not like');
-      expect(params).toContain(`%${HAIP_NO_IN_HOUSE_TEXT}%`);
+      expect(sql).toContain('("haip_post_outbox"."parked_reason" is null or "haip_post_outbox"."parked_reason" = $');
+      expect(params).toContain('haip_rejected');
+      expect(sql).not.toContain('last_error');
     });
 
-    it.each([
-      ['written by the processor now', NO_GUEST_ERROR],
-      ['parked before the guard existed', `HAIP rejected (400): HTTP 400: Room 108 ${HAIP_NO_IN_HOUSE_TEXT}`],
-    ])('refuses a row parked for no in-house guest (%s) with 409 and does not queue', async (_label, lastError) => {
-      const { service } = make({ updateMatches: false, existing: { status: 'needs_attention', lastError } });
+    it.each(['no_in_house_guest', 'stay_ended', 'needs_verification', 'wrong_property'] as const)(
+      'refuses a row parked as %s with 409 and does not queue',
+      async (parkedReason) => {
+        const { service } = make({ updateMatches: false, existing: { status: 'needs_attention', parkedReason } });
 
-      const error = await service.retry(OUTBOX_ID, PROPERTY_ID).catch((e: unknown) => e);
+        const error = await service.retry(OUTBOX_ID, PROPERTY_ID).catch((e: unknown) => e);
 
-      expect(error).toBeInstanceOf(ConflictException);
-      expect((error as ConflictException).message).toMatch(/resolve it here/);
-      expect(enqueue).not.toHaveBeenCalled();
-    });
+        expect(error).toBeInstanceOf(ConflictException);
+        expect((error as ConflictException).message).toMatch(/resolve it here/);
+        expect(enqueue).not.toHaveBeenCalled();
+      },
+    );
 
-    it('still says 400 (not 409) for a non-actionable row, even with that lastError', async () => {
-      const { service } = make({ updateMatches: false, existing: { status: 'posted', lastError: NO_GUEST_ERROR } });
+    it('still says 400 (not 409) for a non-actionable row, even with a resolve-only reason', async () => {
+      const { service } = make({ updateMatches: false, existing: { status: 'posted', parkedReason: 'no_in_house_guest' } });
       await expect(service.retry(OUTBOX_ID, PROPERTY_ID)).rejects.toBeInstanceOf(BadRequestException);
     });
 
@@ -121,14 +132,18 @@ describe('OutboxService', () => {
   });
 
   describe('resolve', () => {
-    it('is allowed for a row parked for no in-house guest, and does not send anything', async () => {
-      const { service, calls } = make({ updateMatches: true, existing: row({ lastError: NO_GUEST_ERROR }) });
+    it('is allowed for a row parked for no in-house guest, does not send anything, and keeps the reason', async () => {
+      const { service, calls } = make({
+        updateMatches: true,
+        existing: row({ lastError: NO_GUEST_ERROR, parkedReason: 'no_in_house_guest' }),
+      });
 
       const result = await service.resolve(OUTBOX_ID, PROPERTY_ID, 'haip-charge-7');
 
-      expect(result).toMatchObject({ status: 'posted', haipChargeId: 'haip-charge-7' });
+      expect(result).toMatchObject({ status: 'posted', haipChargeId: 'haip-charge-7', parkedReason: 'no_in_house_guest' });
       expect(calls.set!['postedAt']).toBeInstanceOf(Date);
-      expect(render(calls.where).params).not.toContain(`%${HAIP_NO_IN_HOUSE_TEXT}%`);
+      expect(calls.set).not.toHaveProperty('parkedReason');
+      expect(render(calls.where).sql).not.toContain('parked_reason');
       expect(enqueue).not.toHaveBeenCalled();
     });
 

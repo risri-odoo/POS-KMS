@@ -33,6 +33,9 @@ function outboxRow(overrides: Partial<typeof haipPostOutbox.$inferSelect> = {}) 
     nextRetryAt: null,
     haipChargeId: null,
     postedAt: null,
+    haipReservationId: null,
+    haipFolioId: null,
+    parkedReason: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -114,7 +117,12 @@ describe('OutboxProcessor', () => {
     const { processor, updates } = make(outboxRow());
 
     await expect(processor.process(job())).resolves.toBe('needs_attention');
-    expect(updates[0]).toMatchObject({ status: 'needs_attention', attempts: 1, lastError: 'HAIP rejected (400): HTTP 400: Room 999 is vacant' });
+    expect(updates[0]).toMatchObject({
+      status: 'needs_attention',
+      attempts: 1,
+      lastError: 'HAIP rejected (400): HTTP 400: Room 999 is vacant',
+      parkedReason: 'haip_rejected',
+    });
   });
 
   it('400 "no in-house reservation" → needs_attention marked as do-not-re-post', async () => {
@@ -130,18 +138,32 @@ describe('OutboxProcessor', () => {
       status: 'needs_attention',
       attempts: 1,
       lastError: `${NO_IN_HOUSE_GUEST_PREFIX}. HAIP rejected (400): HTTP 400: Room 110 ${HAIP_NO_IN_HOUSE_TEXT}`,
+      parkedReason: 'no_in_house_guest',
     });
     expect(isNoInHouseGuestError(updates[0]!['lastError'] as string)).toBe(true);
   });
 
-  it('a pending row already parked for no in-house guest is never sent (e.g. reset by hand)', async () => {
+  it.each(['no_in_house_guest', 'stay_ended', 'needs_verification', 'wrong_property', 'haip_rejected'] as const)(
+    'a pending row with parked reason %s (set back by hand) is never sent, and keeps its reason',
+    async (parkedReason) => {
+      const { processor, updates } = make(outboxRow({ parkedReason }));
+
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(updates).toEqual([{ status: 'needs_attention', nextRetryAt: null, updatedAt: expect.any(Date) }]);
+    },
+  );
+
+  it('a pending row reset by hand before parked_reason existed is never sent, and gets the reason', async () => {
     const { processor, updates } = make(
       outboxRow({ lastError: `HAIP rejected (400): HTTP 400: Room 110 ${HAIP_NO_IN_HOUSE_TEXT}` }),
     );
 
     await expect(processor.process(job())).resolves.toBe('needs_attention');
     expect(postCharge).not.toHaveBeenCalled();
-    expect(updates).toEqual([{ status: 'needs_attention', nextRetryAt: null, updatedAt: expect.any(Date) }]);
+    expect(updates).toEqual([
+      { status: 'needs_attention', nextRetryAt: null, parkedReason: 'no_in_house_guest', updatedAt: expect.any(Date) },
+    ]);
   });
 
   it('500 on a non-final attempt → records the error and nextRetryAt, then throws for BullMQ to back off', async () => {
@@ -180,13 +202,13 @@ describe('OutboxProcessor', () => {
     const { processor, updates } = make(outboxRow({ propertyId: '22222222-2222-4222-8222-222222222222' }));
     await expect(processor.process(job())).resolves.toBe('needs_attention');
     expect(postCharge).not.toHaveBeenCalled();
-    expect(updates[0]).toMatchObject({ status: 'needs_attention', lastError: WRONG_PROPERTY_ERROR });
+    expect(updates[0]).toMatchObject({ status: 'needs_attention', lastError: WRONG_PROPERTY_ERROR, parkedReason: 'wrong_property' });
   });
 
   it('no HAIP_PROPERTY_ID configured → needs_attention, no HTTP call', async () => {
     const { processor, updates } = make(outboxRow(), { ...config, propertyId: undefined });
     await expect(processor.process(job())).resolves.toBe('needs_attention');
     expect(postCharge).not.toHaveBeenCalled();
-    expect(updates[0]).toMatchObject({ lastError: WRONG_PROPERTY_ERROR });
+    expect(updates[0]).toMatchObject({ lastError: WRONG_PROPERTY_ERROR, parkedReason: 'wrong_property' });
   });
 });
