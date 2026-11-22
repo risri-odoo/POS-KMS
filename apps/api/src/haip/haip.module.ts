@@ -4,6 +4,8 @@ import { HAIP_CONFIG, loadHaipConfig, type HaipConfig } from './haip.config.js';
 import { HaipQueue } from './haip-queue.service.js';
 import { HAIP_CLIENT, OutboxProcessor } from './outbox.processor.js';
 import { OutboxWorker } from './outbox.worker.js';
+import { createStayLookup } from './stay-lookup.config.js';
+import { STAY_LOOKUP } from './stay-lookup.js';
 
 @Module({
   providers: [
@@ -14,10 +16,12 @@ import { OutboxWorker } from './outbox.worker.js';
       inject: [HAIP_CONFIG],
       useFactory: (config: HaipConfig) => new HaipClient({ apiUrl: config.apiUrl, apiKey: config.apiKey ?? '' }),
     },
+    // Throws for HAIP_STAY_LOOKUP=fake in production, which stops the API from starting.
+    { provide: STAY_LOOKUP, useFactory: () => createStayLookup() },
     HaipQueue,
     OutboxProcessor,
     OutboxWorker,
   ],
-  exports: [HAIP_CONFIG, HaipQueue],
+  exports: [HAIP_CONFIG, HaipQueue, STAY_LOOKUP],
 })
 export class HaipModule {}
