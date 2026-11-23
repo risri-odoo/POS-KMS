@@ -240,12 +240,34 @@ describe('OrdersService', () => {
         propertyId: PROPERTY_ID,
         orderId: ORDER_ID,
         vendorTxnId: `stayx-rs-${ORDER_ID}`,
+        haipReservationId: null,
+        haipFolioId: null,
       });
       expect(fake.onConflictDoNothing).toHaveBeenCalledWith({
         target: [haipPostOutbox.propertyId, haipPostOutbox.vendorTxnId],
       });
       expect(queue.enqueue).toHaveBeenCalledExactlyOnceWith(OUTBOX_ID);
       expect(events.emitOrderStatusChanged).toHaveBeenCalledExactlyOnceWith(delivered);
+    });
+
+    it('delivered: copies the confirmed stay ids from the order onto the outbox row', async () => {
+      const delivered = {
+        ...updatedRow,
+        status: 'delivered',
+        haipReservationId: '66666666-6666-4666-8666-666666666666',
+        haipFolioId: '77777777-7777-4777-8777-777777777777',
+      } as Order;
+      const fake = fakeTx('ready', delivered);
+      db.transaction.mockImplementation((cb: (tx: unknown) => Promise<unknown>) => cb(fake.tx));
+
+      await service.updateStatus(ORDER_ID, PROPERTY_ID, 'delivered');
+
+      expect(fake.values).toHaveBeenCalledWith(
+        expect.objectContaining({
+          haipReservationId: '66666666-6666-4666-8666-666666666666',
+          haipFolioId: '77777777-7777-4777-8777-777777777777',
+        }),
+      );
     });
 
     it.each([

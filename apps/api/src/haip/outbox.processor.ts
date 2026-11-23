@@ -1,5 +1,5 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull } from 'drizzle-orm';
 import { haipPostOutbox, orderItems, orders } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { buildInboundCharge } from './charge-mapper.js';
@@ -7,6 +7,8 @@ import { HaipClient } from './haip-client.js';
 import { HAIP_CONFIG, type HaipConfig } from './haip.config.js';
 import { HAIP_JOB_ATTEMPTS, backoffDelayMs, type HaipJobData } from './haip-queue.service.js';
 import { NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError, reasonForRejection } from './no-in-house-guard.js';
+import { STAY_LOOKUP, type StayLookup } from './stay-lookup.js';
+import { decidePosting } from './stay-recheck.js';
 
 export const HAIP_CLIENT = Symbol('HAIP_CLIENT');
 
@@ -17,7 +19,8 @@ export interface OutboxJob {
   opts: { attempts?: number };
 }
 
-export type ProcessOutcome = 'skipped' | 'posted' | 'needs_attention' | 'failed';
+/** deferred: the stay lookup was unavailable, nothing was sent, the sweeper asks again later. */
+export type ProcessOutcome = 'skipped' | 'posted' | 'needs_attention' | 'failed' | 'deferred';
 
 export const MAY_BE_POSTED_PREFIX = 'May already be posted in HAIP, verify the folio before retrying';
 export const WRONG_PROPERTY_ERROR = 'No HAIP key configured for this property';
@@ -37,6 +40,7 @@ export class OutboxProcessor {
     @Inject(DRIZZLE) private readonly db: Db,
     @Inject(HAIP_CLIENT) private readonly client: HaipClient,
     @Inject(HAIP_CONFIG) private readonly config: HaipConfig,
+    @Inject(STAY_LOOKUP) private readonly stayLookup: StayLookup,
   ) {}
 
   async process(job: OutboxJob): Promise<ProcessOutcome> {
@@ -80,7 +84,46 @@ export class OutboxProcessor {
       .from(orderItems)
       .where(and(eq(orderItems.orderId, order.id), eq(orderItems.propertyId, row.propertyId)));
 
-    const charge = buildInboundCharge({ ...order, items }, row.vendorTxnId, this.config.timezone);
+    // Re-check the stay before every attempt, retries included (INTEGRATION_DESIGN.md §4.8).
+    const decision = await decidePosting(this.stayLookup, {
+      propertyId: row.propertyId,
+      orderRoom: order.roomNumber,
+      verificationStatus: order.verificationStatus ?? null,
+      reservationId: row.haipReservationId ?? order.haipReservationId ?? null,
+      folioId: row.haipFolioId ?? order.haipFolioId ?? null,
+      deliveredAt: order.deliveredAt ?? row.createdAt,
+    });
+
+    if (decision.kind === 'park') {
+      await this.finish(row, { status: 'needs_attention', parkedReason: decision.reason, lastError: decision.message, nextRetryAt: null });
+      this.logger.warn(`Not sending ${row.vendorTxnId}: ${decision.reason}`);
+      return 'needs_attention';
+    }
+    if (decision.kind === 'defer') {
+      // Nothing sent, so no attempt is used and the row stays pending; the sweeper picks it up at retryAt.
+      await this.finish(row, {
+        lastError: `Stay lookup unavailable, nothing sent yet; will check again: ${decision.reason}`,
+        nextRetryAt: decision.retryAt,
+      });
+      this.logger.warn(`Deferring ${row.vendorTxnId}: stay lookup unavailable (${decision.reason})`);
+      return 'deferred';
+    }
+    if (decision.kind === 'post_to_stay' && decision.matchedAtPosting) {
+      // An unverified order matched to the only in-house stay in its room. The ids are kept, but
+      // verification_status stays 'unverified': no person confirmed this guest.
+      await this.finish(row, { haipReservationId: decision.reservationId, haipFolioId: decision.folioId });
+      await this.db
+        .update(orders)
+        .set({ haipReservationId: decision.reservationId, haipFolioId: decision.folioId })
+        .where(and(eq(orders.id, order.id), eq(orders.propertyId, row.propertyId), isNull(orders.haipReservationId)));
+      this.logger.log(
+        `Unverified order ${order.orderNumber} matched at posting to the only in-house stay in room ${decision.roomNumber} ` +
+          `(reservation ${decision.reservationId}); not confirmed by a person`,
+      );
+    }
+
+    // Post by the room the stay is in now (follows room moves), or the order's room on today's path.
+    const charge = buildInboundCharge({ ...order, roomNumber: decision.roomNumber, items }, row.vendorTxnId, this.config.timezone);
     const result = await this.client.postCharge(charge);
     const attempts = row.attempts + 1;
 

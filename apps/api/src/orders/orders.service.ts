@@ -172,7 +172,14 @@ export class OrdersService {
       if (status === 'delivered') {
         const [outbox] = await tx
           .insert(haipPostOutbox)
-          .values({ propertyId, orderId: row.id, vendorTxnId: vendorTxnIdFor(row.id) })
+          .values({
+            propertyId,
+            orderId: row.id,
+            vendorTxnId: vendorTxnIdFor(row.id),
+            // The stay staff confirmed, if any; the worker re-checks it before posting.
+            haipReservationId: row.haipReservationId ?? null,
+            haipFolioId: row.haipFolioId ?? null,
+          })
           .onConflictDoNothing({ target: [haipPostOutbox.propertyId, haipPostOutbox.vendorTxnId] })
           .returning({ id: haipPostOutbox.id });
         outboxId = outbox?.id;

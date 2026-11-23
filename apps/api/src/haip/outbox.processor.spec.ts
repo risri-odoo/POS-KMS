@@ -6,6 +6,9 @@ import type { HaipClient, HaipPostResult } from './haip-client.js';
 import type { HaipConfig } from './haip.config.js';
 import type { Db } from '../database/database.module.js';
 import { HAIP_NO_IN_HOUSE_TEXT, NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError } from './no-in-house-guard.js';
+import { FakeStayLookup, type FakeStay } from './fake-stay-lookup.js';
+import { NotConfiguredStayLookup, type StayLookup } from './stay-lookup.js';
+import { STAY_LOOKUP_MAX_WAIT_MS } from './stay-recheck.js';
 
 const PROPERTY_ID = '11111111-1111-4111-8111-111111111111';
 const ORDER_ID = '33333333-3333-4333-8333-333333333333';
@@ -54,24 +57,28 @@ const order = {
   updatedAt: new Date('2026-10-06T02:30:00Z'),
 };
 
-/** Fake db: select results keyed by table; every update's .set() payload is recorded. */
-function fakeDb(row: ReturnType<typeof outboxRow> | undefined) {
+/**
+ * Fake db: select results keyed by table. Every outbox update's .set() payload is
+ * recorded in `updates`; updates to the orders table go to `orderUpdates`.
+ */
+function fakeDb(row: ReturnType<typeof outboxRow> | undefined, orderRow: Record<string, unknown> = order) {
   const updates: Record<string, unknown>[] = [];
+  const orderUpdates: Record<string, unknown>[] = [];
   const results = new Map<unknown, unknown[]>([
     [haipPostOutbox, row ? [row] : []],
-    [orders, [order]],
+    [orders, [orderRow]],
     [orderItems, [{ id: 'i1' }, { id: 'i2' }]],
   ]);
   const db = {
     select: () => ({ from: (table: unknown) => ({ where: () => Promise.resolve(results.get(table) ?? []) }) }),
-    update: () => ({
+    update: (table: unknown) => ({
       set: (changes: Record<string, unknown>) => {
-        updates.push(changes);
+        (table === orders ? orderUpdates : updates).push(changes);
         return { where: () => Promise.resolve([]) };
       },
     }),
   };
-  return { db: db as unknown as Db, updates };
+  return { db: db as unknown as Db, updates, orderUpdates };
 }
 
 function job(attemptsMade = 0, attempts = 5): OutboxJob {
@@ -80,9 +87,14 @@ function job(attemptsMade = 0, attempts = 5): OutboxJob {
 
 describe('OutboxProcessor', () => {
   let postCharge: ReturnType<typeof vi.fn<(c: unknown) => Promise<HaipPostResult>>>;
-  const make = (row: ReturnType<typeof outboxRow> | undefined, cfg: HaipConfig = config) => {
-    const { db, updates } = fakeDb(row);
-    return { processor: new OutboxProcessor(db, { postCharge } as unknown as HaipClient, cfg), updates };
+  const make = (
+    row: ReturnType<typeof outboxRow> | undefined,
+    cfg: HaipConfig = config,
+    opts: { lookup?: StayLookup; order?: Record<string, unknown> } = {},
+  ) => {
+    const { db, updates, orderUpdates } = fakeDb(row, opts.order);
+    const lookup = opts.lookup ?? new NotConfiguredStayLookup();
+    return { processor: new OutboxProcessor(db, { postCharge } as unknown as HaipClient, cfg, lookup), updates, orderUpdates };
   };
 
   beforeEach(() => {
@@ -210,5 +222,169 @@ describe('OutboxProcessor', () => {
     await expect(processor.process(job())).resolves.toBe('needs_attention');
     expect(postCharge).not.toHaveBeenCalled();
     expect(updates[0]).toMatchObject({ lastError: WRONG_PROPERTY_ERROR, parkedReason: 'wrong_property' });
+  });
+
+  describe('stay re-check before posting (Phase 1 step 6)', () => {
+    const RES = '66666666-6666-4666-8666-666666666666';
+    const FOLIO = '77777777-7777-4777-8777-777777777777';
+    const stay = (overrides: Partial<FakeStay> = {}): FakeStay => ({
+      propertyId: PROPERTY_ID,
+      reservationId: RES,
+      status: 'checked_in',
+      roomNumber: '1204',
+      departureDate: '2026-12-01',
+      guestFolioId: FOLIO,
+      occupants: [{ firstName: 'Ada', lastInitial: 'L' }],
+      ...overrides,
+    });
+    const verifiedOrder = { ...order, verificationStatus: 'verified', haipReservationId: RES, haipFolioId: FOLIO, deliveredAt: new Date() };
+    const unverifiedOrder = { ...order, verificationStatus: 'unverified', haipReservationId: null, haipFolioId: null, deliveredAt: new Date() };
+    const boundRow = () => outboxRow({ haipReservationId: RES, haipFolioId: FOLIO });
+    const sentRoom = () => (postCharge.mock.calls[0]![0] as { roomNumber: string }).roomNumber;
+
+    it('HAIP_STAY_LOOKUP unset: keeps today’s path and posts by the order’s room, even for a bound order', async () => {
+      postCharge.mockResolvedValue({ kind: 'created', chargeId: 'c1' });
+      const { processor, updates } = make(boundRow(), config, { order: verifiedOrder, lookup: new NotConfiguredStayLookup() });
+
+      await expect(processor.process(job())).resolves.toBe('posted');
+      expect(sentRoom()).toBe('1204');
+      expect(updates[0]).toMatchObject({ status: 'posted' });
+    });
+
+    it('HAIP_STAY_LOOKUP unset: an unverified order also posts by its room (default setup still posts)', async () => {
+      postCharge.mockResolvedValue({ kind: 'created', chargeId: 'c1' });
+      const { processor } = make(outboxRow(), config, { order: unverifiedOrder, lookup: new NotConfiguredStayLookup() });
+      await expect(processor.process(job())).resolves.toBe('posted');
+      expect(sentRoom()).toBe('1204');
+    });
+
+    it('HAIP_STAY_LOOKUP unset: the existing guard still parks a no-in-house rejection', async () => {
+      postCharge.mockResolvedValue({ kind: 'rejected', status: 400, message: `HTTP 400: Room 1204 ${HAIP_NO_IN_HOUSE_TEXT}` });
+      const { processor, updates } = make(outboxRow(), config, { order: unverifiedOrder, lookup: new NotConfiguredStayLookup() });
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(updates[0]).toMatchObject({ parkedReason: 'no_in_house_guest' });
+    });
+
+    it('bound stay still in-house and alone in its room: posts by that room', async () => {
+      postCharge.mockResolvedValue({ kind: 'created', chargeId: 'c1' });
+      const { processor } = make(boundRow(), config, { order: verifiedOrder, lookup: new FakeStayLookup([stay()]) });
+      await expect(processor.process(job())).resolves.toBe('posted');
+      expect(sentRoom()).toBe('1204');
+    });
+
+    it('room move: posts to the room the guest is in now, with the same vendorTxnId', async () => {
+      postCharge.mockResolvedValue({ kind: 'created', chargeId: 'c1' });
+      const { processor } = make(boundRow(), config, { order: verifiedOrder, lookup: new FakeStayLookup([stay({ roomNumber: '1510' })]) });
+
+      await expect(processor.process(job())).resolves.toBe('posted');
+      expect(postCharge).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ roomNumber: '1510', vendorTxnId: `stayx-rs-${ORDER_ID}` }));
+    });
+
+    it('checkout: parks as stay_ended and sends nothing', async () => {
+      const { processor, updates } = make(boundRow(), config, { order: verifiedOrder, lookup: new FakeStayLookup([stay({ status: 'checked_out' })]) });
+
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(updates).toEqual([
+        expect.objectContaining({ status: 'needs_attention', parkedReason: 'stay_ended', nextRetryAt: null }),
+      ]);
+      expect(updates[0]!['lastError']).toMatch(/stay ended.*checked_out.*Nothing was sent/);
+    });
+
+    it('stay gone from HAIP: stay_ended, nothing sent', async () => {
+      const { processor, updates } = make(boundRow(), config, { order: verifiedOrder, lookup: new FakeStayLookup([]) });
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(updates[0]).toMatchObject({ parkedReason: 'stay_ended' });
+    });
+
+    it('room now shared with another in-house stay: needs_verification, nothing sent', async () => {
+      const other = stay({ reservationId: '88888888-8888-4888-8888-888888888888', guestFolioId: null });
+      const { processor, updates } = make(boundRow(), config, { order: verifiedOrder, lookup: new FakeStayLookup([stay(), other]) });
+
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(updates[0]).toMatchObject({ parkedReason: 'needs_verification' });
+    });
+
+    it('re-checks on retries too: a stay that ended between attempts is not sent again', async () => {
+      const lookup = new FakeStayLookup([stay()]);
+      postCharge.mockResolvedValue({ kind: 'unavailable', status: 500, message: 'HTTP 500' });
+      const first = make(boundRow(), config, { order: verifiedOrder, lookup });
+      await expect(first.processor.process(job(0))).rejects.toBeInstanceOf(HaipRetryableError);
+      expect(postCharge).toHaveBeenCalledTimes(1);
+
+      lookup.checkOut(RES);
+      const second = make(boundRow(), config, { order: verifiedOrder, lookup });
+      await expect(second.processor.process(job(1))).resolves.toBe('needs_attention');
+      expect(postCharge).toHaveBeenCalledTimes(1);
+      expect(second.updates[0]).toMatchObject({ parkedReason: 'stay_ended' });
+    });
+
+    it('lookup unavailable soon after delivery: defers, sends nothing, keeps the row pending and the attempt count', async () => {
+      const lookup = new FakeStayLookup([stay()]);
+      lookup.setUnavailable('connect ECONNREFUSED');
+      const { processor, updates } = make(outboxRow({ haipReservationId: RES, haipFolioId: FOLIO, attempts: 2 }), config, {
+        order: verifiedOrder,
+        lookup,
+      });
+
+      await expect(processor.process(job())).resolves.toBe('deferred');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(updates).toHaveLength(1);
+      expect(updates[0]).not.toHaveProperty('status');
+      expect(updates[0]).not.toHaveProperty('attempts');
+      expect((updates[0]!['nextRetryAt'] as Date).getTime()).toBeGreaterThan(Date.now());
+      expect(updates[0]!['lastError']).toMatch(/nothing sent yet/);
+    });
+
+    it(`lookup still unavailable ${STAY_LOOKUP_MAX_WAIT_MS / 3_600_000} hours after delivery: parks as needs_verification`, async () => {
+      const lookup = new FakeStayLookup([stay()]);
+      lookup.setUnavailable('connect ECONNREFUSED');
+      const old = { ...verifiedOrder, deliveredAt: new Date(Date.now() - STAY_LOOKUP_MAX_WAIT_MS - 1000) };
+      const { processor, updates } = make(boundRow(), config, { order: old, lookup });
+
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(updates[0]).toMatchObject({ status: 'needs_attention', parkedReason: 'needs_verification', nextRetryAt: null });
+    });
+
+    it('unverified order, one in-house stay in its room: stores the ids, keeps it unverified, logs the match, then posts', async () => {
+      const log = vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+      postCharge.mockResolvedValue({ kind: 'created', chargeId: 'c1' });
+      const { processor, updates, orderUpdates } = make(outboxRow(), config, { order: unverifiedOrder, lookup: new FakeStayLookup([stay()]) });
+
+      await expect(processor.process(job())).resolves.toBe('posted');
+
+      expect(updates[0]).toEqual({ haipReservationId: RES, haipFolioId: FOLIO, updatedAt: expect.any(Date) });
+      expect(orderUpdates).toEqual([{ haipReservationId: RES, haipFolioId: FOLIO }]);
+      expect(orderUpdates[0]).not.toHaveProperty('verificationStatus');
+      expect(log).toHaveBeenCalledWith(expect.stringMatching(/matched at posting.*not confirmed by a person/));
+      expect(sentRoom()).toBe('1204');
+      expect(updates[1]).toMatchObject({ status: 'posted' });
+    });
+
+    it('unverified order, empty room: needs_verification, nothing sent, nothing attached', async () => {
+      const { processor, updates, orderUpdates } = make(outboxRow(), config, { order: unverifiedOrder, lookup: new FakeStayLookup([]) });
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(orderUpdates).toEqual([]);
+      expect(updates[0]).toMatchObject({ parkedReason: 'needs_verification' });
+    });
+
+    it('unverified order, two in-house stays in its room: needs_verification, nothing sent', async () => {
+      const other = stay({ reservationId: '88888888-8888-4888-8888-888888888888' });
+      const { processor, updates } = make(outboxRow(), config, { order: unverifiedOrder, lookup: new FakeStayLookup([stay(), other]) });
+      await expect(processor.process(job())).resolves.toBe('needs_attention');
+      expect(postCharge).not.toHaveBeenCalled();
+      expect(updates[0]).toMatchObject({ parkedReason: 'needs_verification' });
+    });
+
+    it('an order from before Phase 1 keeps today’s path even with a working lookup', async () => {
+      postCharge.mockResolvedValue({ kind: 'created', chargeId: 'c1' });
+      const { processor } = make(outboxRow(), config, { order: { ...order, verificationStatus: null }, lookup: new FakeStayLookup([]) });
+      await expect(processor.process(job())).resolves.toBe('posted');
+      expect(sentRoom()).toBe('1204');
+    });
   });
 });
