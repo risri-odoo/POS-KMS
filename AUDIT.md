@@ -1,7 +1,7 @@
 # StayX POS + KMS — Audit against the HSM + POS + KMS spec
 
 Originally audited: `pos/` at commit `a748f97`, 2026-10-25. HAIP read at `cb8d140`, read-only.
-Last updated 2026-11-22: HAIP at `439956d` (§14). POS code unchanged since UI merge `9c6e07b` (2026-11-05). §9 and §10 are dated run records and keep the versions they ran on.
+Last updated 2026-11-23: HAIP at `439956d` (§14). POS has Phase 1 of `INTEGRATION_DESIGN.md` (stay binding, steps 0–7) up to `7dac007`; the live stay-lookup check is §15. §9 and §10 are dated run records and keep the versions they ran on.
 Spec: `../HSM+POS+KMS.pdf` (the brief said `./docs/HSM_POS_KMS.pdf`; no `docs/` folder exists).
 Method: code reading with `file:line` evidence. Nothing was run, migrated, installed or started for the original audit.
 "Verified" below means "read in code", unless it points to the live runs in §9 and §10.
@@ -422,3 +422,49 @@ Reviewed on 2026-11-22 by reading `git log` and `git diff 83f88e5..439956d` in `
 **Other changes, none affecting POS:** admin role de-duplication (seed and roles service), email template overrides, rate-plan and rate-override reports, property settings merge, and a night-audit `mode` field accepted from cron. The service doesn't branch on it (`night-audit/dto/run-audit.dto.ts`).
 
 **`INTEGRATION_DESIGN.md`:** none of R1–R8 is delivered. The Q5 and Q6 statuses and the shifted `folio.service.ts` / `folio.controller.ts` line citations are updated there.
+
+---
+
+## 15. Stay lookup against live HAIP (Phase 1 step 7, 2026-11-23)
+
+Read-only check of `HAIP_STAY_LOOKUP=haip` (`apps/api/src/haip/haip-stay-lookup.ts`, commit `7dac007`) against local HAIP `439956d`, through a service principal.
+- **No writes:** the bridge was off (no `HAIP_API_KEY`), no orders were placed and nothing was posted. POS stayed at 16 orders and 10 outbox rows.
+- **HAIP files:** none were changed.
+
+### Setup (left running for testing)
+
+| What | Details |
+|---|---|
+| Keycloak | `haip-keycloak`, started with HAIP's own `auth` profile (`docker compose --profile auth up -d keycloak`). It works, but Docker shows it **unhealthy** because of a health-check bug (`INTEGRATION_DESIGN.md` §7 N11) |
+| Client | `stayx-pos` in realm `haip`: confidential, service accounts only. Mappers: audience `haip-api`, and `property_ids` = `["a0000001-0000-4000-a000-000000000001"]` as a **JSON** claim (the README's String form gave a plain string that HAIP ignores, N12) |
+| HAIP principal | `pnpm integration:link` (compiled script in `haip-api`): user `svc-stayx-pos@integrations.local`, `keycloak_sub` `8cf2f6c9-f3a1-4cbd-bd12-e791ab613976`, property role `integration_stayx-pos` with `reservations.read` and `folios.read` only |
+| Auth-on HAIP | `haip-api-auth` on `127.0.0.1:3001` (`docker run`, same image and database). `KEYCLOAK_URL=http://localhost:8080` matches the token's issuer, and `OIDC_JWKS_URI=http://haip-keycloak:8080/...` fetches keys inside Docker. The normal `haip-api` on 3000 is unchanged and auth-off |
+| Settings | `C:\dvt\Marksheets\ayush_patel\secrets\stayx-pos-sp.env`, outside both repos (git in `pos` and `haip` reports it as outside the repository). The secret was never printed or logged |
+
+### Results
+
+| Check | Result |
+|---|---|
+| Token claims | `iss` `http://localhost:8080/realms/haip`, `aud` includes `haip-api`, `azp` `stayx-pos`, `property_ids` an array, 5-minute expiry |
+| No token | 401 |
+| Every endpoint the adapter uses (in-house reservations, reservation by id, its occupants, open guest folios) | 200 |
+| Another property | 403 |
+| Folio write | 403 (refused before anything is written) |
+| `GET /guests/:id`, with **no** `guests.read` granted | **200**: confirms item 24 and R8 (HAIP read routes have no permission check) |
+| `GET /stays/lookup` for all 13 in-house rooms | All match HAIP's database: reservation, departure, and guest as first name + initial |
+| Empty or unknown rooms (108, 203, 999) | `none` |
+| `getStay`: in-house (210), checked out, unknown id | Found with status, room and the right open folio; `inHouse: false` with no folio; `not_found` |
+| Privacy | No full surname from HAIP's guest table and no contact details in any POS response; the secret wasn't in the POS log |
+
+### Not covered yet
+
+- **Posting with a bound stay:** the worker's re-check has been tested in unit tests only, not live. A live posting run needs `stayx_pos_live` migrated (§7 item 23) and your OK.
+- **Room 102's two stays:** the demo data has no room with two in-house stays, so the shared-room path wasn't seen live.
+
+### How to stop or undo
+
+- **Stop for now (keeps everything):** `docker stop haip-api-auth haip-keycloak`. Start again with `docker start haip-keycloak haip-api-auth`.
+- **Remove the auth-on instance:** `docker rm -f haip-api-auth`.
+- **Remove the Keycloak client:** `docker exec haip-keycloak /opt/keycloak/bin/kcadm.sh delete clients/d1ffe41b-d29c-4675-86d3-d58f94789d08 -r haip` (after `kcadm.sh config credentials … --user admin --password admin`; in Git Bash set `MSYS_NO_PATHCONV=1` first).
+- **Unlink the principal in HAIP:** delete the `user_roles`, `role_permissions`, `roles` (`integration_stayx-pos`) and `users` (`svc-stayx-pos@integrations.local`) rows. Check the column names before running it.
+- **Delete the settings:** `secrets/stayx-pos-sp.env`.

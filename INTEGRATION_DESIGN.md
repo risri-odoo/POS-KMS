@@ -463,7 +463,7 @@ Rough estimates for one POS developer; HAIP effort is a guess for their team.
 | 4 | Staff flow API: `GET /stays/lookup`; `POST /orders` with an optional `reservationId` (re-checked by the server) or as `unverified` | 1–1.5 days |
 | 5 | Staff flow screen: Find guest → confirm first name → Place order; "Unverified" warning that staff must confirm | 1–1.5 days |
 | 6 | Worker re-check before each attempt (§4.8), including re-verifying `unverified` orders | 1–1.5 days |
-| 7 | Real `StayLookup` adapter over HAIP staff REST with a service principal (local dev setup first) | 2 days + setup |
+| 7 | Real `StayLookup` adapter over HAIP staff REST with a service principal (local dev setup first). **Done 2026-11-23:** verified read-only against local HAIP, see `AUDIT.md` §15 | 2 days + setup |
 
 **Risks**
 
@@ -504,8 +504,10 @@ Status at HAIP `83f88e5`.
 | N6 | Can a guest folio be settled mid-stay, and should R2 return the current open folio of the same reservation? | New | `H/folio/folio.service.ts:199-203` |
 | N7 | Can a room have two in-house reservations at once? Folio-inbound takes the first | New | `H/folio-inbound/folio-inbound.service.ts:56-66` |
 | N8 | Should the check-in magic token stop working at checkout? It's only time-limited today | New (security) | `H/guest-check-in/check-in-magic.guard.ts:17-29` |
-| N9 | Add read permissions to guest and reservation GET routes (R8)? | New (security) | `H/auth/permissions.guard.ts:41-42` |
+| N9 | Add read permissions to guest and reservation GET routes (R8)? | New (security). **Confirmed live 2026-11-23:** the POS service principal, linked with only `reservations.read` and `folios.read`, gets 200 from `GET /guests/:id` (`AUDIT.md` §15) | `H/auth/permissions.guard.ts:41-42` |
 | N10 | Should the check-in throttle (and R1's limiter) use Redis for multi-replica setups? | New | `H/guest-check-in/check-in-throttle.guard.ts:19` |
+| N11 | **Keycloak's compose health check never passes.** It opens a raw TCP connection, sends an HTTP/1.1 request to `/health/ready`, then waits with `cat` for the server to close the connection. Keycloak keeps HTTP/1.1 connections alive, so `cat` never finishes and every check hits the 5 s timeout. The container stays "unhealthy" although `/health/ready` returns `UP`. So `docker-compose.auth.yml`, whose `api` waits for `keycloak: service_healthy`, can never start. Suggested fix: send `Connection: close` (or HTTP/1.0), or check the port with `curl`/`wget` if the image has one | New (found 2026-11-23) | `haip/docker-compose.yml` (service `keycloak`, `healthcheck`); `haip/docker-compose.auth.yml` (`depends_on: keycloak: condition: service_healthy`) |
+| N12 | **The documented `property_ids` mapper produces a string, which HAIP ignores.** `keycloak/README.md` gives a hardcoded-claim mapper with `jsonType.label: String` and `multivalued: true`. In Keycloak 24 that yields `"property_ids": "<uuid>"`, not an array. HAIP only reads an array (`principalFromPayload`), so the principal gets no property scope (403). What worked: `jsonType.label: JSON` with `claim.value: ["<uuid>"]`. Please fix the README and `docs/integrations/service-principal.md` | New (found 2026-11-23) | `haip/keycloak/README.md` (Property scope and example JSON); `H/auth/oidc-config.ts:130-136` |
 
 ---
 
