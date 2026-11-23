@@ -468,3 +468,80 @@ Read-only check of `HAIP_STAY_LOOKUP=haip` (`apps/api/src/haip/haip-stay-lookup.
 - **Remove the Keycloak client:** `docker exec haip-keycloak /opt/keycloak/bin/kcadm.sh delete clients/d1ffe41b-d29c-4675-86d3-d58f94789d08 -r haip` (after `kcadm.sh config credentials … --user admin --password admin`; in Git Bash set `MSYS_NO_PATHCONV=1` first).
 - **Unlink the principal in HAIP:** delete the `user_roles`, `role_permissions`, `roles` (`integration_stayx-pos`) and `users` (`svc-stayx-pos@integrations.local`) rows. Check the column names before running it.
 - **Delete the settings:** `secrets/stayx-pos-sp.env`.
+
+---
+
+## 16. Live posting run with stay binding (Phase 1, 2026-11-23)
+
+The full Phase 1 path, run against local HAIP `439956d`:
+1. Orders are bound to HAIP stays through the service-principal lookup.
+2. Posting goes through folio-inbound with the worker's stay re-check before every attempt (`INTEGRATION_DESIGN.md` §4.8).
+
+**Script:** `scripts/live-run-phase1.mjs`. **Result: 32 of 32 checks passed, with no surprises.**
+
+### Setup
+
+- **Backups first:**
+  - `backups/stayx_pos_live-before-phase1-20261123-131146.dump`
+  - `backups/haip-before-phase1-20261123-131146.dump` (the `haip` database only; Keycloak's database is separate)
+- **`stayx_pos_live` migrated to `0001`:** the dry run and the backfill both tagged 3 rows `no_in_house_guest`; the posted and failed rows were left alone. `stayx_pos` wasn't touched.
+- **POS API on `:4100`:**
+  - against `stayx_pos_live`, with Redis DB 1;
+  - bridge on, posting through folio-inbound on the auth-on `haip-api-auth` (`:3001`);
+  - `HAIP_STAY_LOOKUP=haip` with the `stayx-pos` service principal (§15).
+- **Temporary key:** a property-scoped key, held in memory only and revoked at the end. A post with it afterwards got 401, and neither the key nor the client secret appears in the POS logs.
+- **Orders:** each is one 20.00 USD "Live-run Club Sandwich". Bound orders went through `GET /stays/lookup`, then `reservationId` + `confirmedGuestName`.
+
+### Results
+
+| # | Scenario | What happened | Result |
+|---|---|---|---|
+| S1 | Bound, normal post | David P. (101), delivered | ✅ Posted on attempt 1; HAIP recorded room 101; one 20.00 `food_beverage` charge on his guest folio |
+| S2 | Room move before delivery | Hans M. ordered in 210; HAIP moved him 210 → 208; then delivered | ✅ HAIP's folio-inbound record shows **room 208**, charge on **Hans's** folio (`f2000001-…000b`). The charge followed the guest (§9 S5 is fixed) |
+| S3 | Checkout before delivery | Lisa T. (405) ordered; HAIP checked her out; delivered | ✅ `needs_attention` / `stay_ended`, 0 attempts, **nothing sent** (no HAIP post row for that `vendorTxnId`) |
+| S4 | Checkout, re-let, Retry | Ahmed A. (302) ordered; checked out; delivered → `stay_ended`. Room 302 cleaned; reservation …0014 (Elena P.) assigned to 302 and checked in. Staff pressed **Retry** | ✅ **409**, "stay had ended… cannot be retried". Row unchanged, and **still unchanged after more than 5 minutes of sweeper runs**. Nothing posted for that order; **Elena's new folio has no `food_beverage` charge** (its only line is HAIP's 50.00 early check-in fee). §9 S6c is fixed |
+| S5 | Lookup down | Keycloak stopped and the POS API restarted, so no token was cached; Marcus W. (201) delivered | ✅ Outcome `deferred`: still `pending`, 0 attempts, next try in about 5 minutes, "Stay lookup unavailable, nothing sent yet", no HAIP post row |
+| S6 | Unverified, matched at posting | While the lookup was down, an **unverified** order for room 102 was accepted. After Keycloak came back it was delivered | ✅ Posted on Takeshi Y.'s folio (room 102). Reservation id stored on the order and the outbox row, `verification_status` still **`unverified`**. Log: "Unverified order RS-261123-9DY9 matched at posting to the only in-house stay in room 102 … not confirmed by a person" |
+| S6b | Unverified, empty room | Unverified order for vacant room 103, placed while down, delivered after recovery | ✅ `needs_verification`, 0 attempts, nothing sent |
+| S5r | Recovery | Keycloak back; the sweeper retried the deferred row after the 5-minute delay | ✅ S5 posted on Marcus W.'s folio (room 201) |
+
+### What this confirms
+
+- **Wrong guest:** a charge for a guest who checked out is never re-sent by room number, even after the room is re-let and staff press Retry.
+- **Room moves:** the charge follows the guest to the new room.
+- **Lookup down:** nothing is sent and no HAIP attempt is used; the row waits and posts once the lookup is back.
+- **Unverified orders:** they post only when HAIP shows exactly one in-house stay in the room, and they stay marked unverified.
+- **Not tested live:**
+  - the 6-hour cut-off (unit tests only);
+  - two stays in one room (the demo data has none);
+  - the window between the re-check and HAIP's own room lookup (§4.8 "remaining risk"; closed by R3).
+
+### State left behind (HAIP not reset yet, so the folios can be checked)
+
+- **Charges:** four 20.00 `food_beverage` charges, no tax rows (there's still no F&B rule):
+
+  | Guest | Reservation | Room | Folio balance now |
+  |---|---|---|---|
+  | David P. | …0008 | 101 | 233.57 |
+  | Hans M. | …000b | 208 | 86.60 |
+  | Takeshi Y. | …000a | 102 | 281.03 |
+  | Marcus W. | …0006 | 201 | 673.14 |
+
+- **Reservations:**
+  - Hans M. (…000b) moved 210 → 208.
+  - Lisa T. (…000e) and Ahmed A. (…0009) checked out.
+  - Elena P. (…0014) checked in to 302, with a new guest folio `616cc7f6-…`.
+- **Rooms:** 208 and 302 occupied; 210 and 405 `vacant_dirty`. Room-status audit rows were written.
+- **Temporary key:** `175a7a00-…`, revoked.
+- **POS `stayx_pos_live`:** 7 new orders and outbox rows: 4 posted, 2 `stay_ended`, 1 `needs_verification`.
+- **Containers:** `haip-api-auth`, `haip-keycloak` (still shown "unhealthy", N11), `pos-postgres-1` and `pos-redis-1` are still running.
+
+### Reset (when asked)
+
+- **HAIP:**
+  1. `docker stop haip-api haip-api-auth`
+  2. `docker exec -i haip-postgres pg_restore -U haip -d haip --clean --if-exists < backups/haip-before-phase1-20261123-131146.dump`
+  3. `docker start haip-api haip-api-auth`
+
+  This keeps the §15 service-principal link, which is in the dump.
+- **`stayx_pos_live`:** restore its dump the same way into `pos-postgres-1`, or drop it.
