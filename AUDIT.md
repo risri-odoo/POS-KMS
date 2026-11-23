@@ -192,6 +192,11 @@ What POS needs but can't get today:
 21. **Test KMS on a real kitchen tablet** (S): readability, beep volume, and how many tickets fit per column.
 22. **Compact ticket mode** (M, if needed): consider it if a busy kitchen scrolls too much. About two tickets fit per column at 1024×768.
 23. **Migrate `stayx_pos_live` before the next live run** (S): it has only migration `0000`, so the API's queries on the Phase 1 columns fail against it. Back it up first. The live-run scripts now send `unverified: true` and expect `HAIP_STAY_LOOKUP` unset.
+24. **The POS service principal can read guest phone numbers** (added 2026-11-23, Phase 1 step 7; ties to HAIP request R8 in `INTEGRATION_DESIGN.md` §5.2).
+   - **The grant:** `HAIP_STAY_LOOKUP=haip` uses a service principal linked with `reservations.read` and `folios.read` only (decided 2026-11-23). `guests.read` was left out: the adapter never needs it, and it would let the credential call `GET /guests/:id` and `GET /guests?search=`, which return phone and email.
+   - **It still reaches phones without `guests.read`:** HAIP's read routes have no permission check today, so any linked principal for the property can call `/guests` anyway. `GET /reservations/:id`, which the adapter calls, also returns the full guest record with phone and email.
+   - **What POS does with it:** the adapter (`apps/api/src/haip/haip-stay-lookup.ts`) keeps only first name, surname initial, status, room, departure and folio id. It never logs or stores a response body, and it never calls `/guests`. Tests check that phone and email don't come out.
+   - **Still to do:** keep the secret out of git and logs; ask HAIP for R8 (permission checks on read routes) and R1/R2 (a lookup that never returns contact details).
 
 ---
 
