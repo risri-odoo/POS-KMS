@@ -103,6 +103,8 @@ async function startPos() {
     cwd: POS_DIR,
     env: {
       ...process.env,
+      // These runs call the API without a token; the login checks are tested in Step G.
+      POS_AUTH_ENABLED: 'false',
       PORT: '4100',
       DATABASE_URL: 'postgres://stayx:stayx@localhost:5433/stayx_pos_live',
       REDIS_URL: 'redis://localhost:6380/1',
