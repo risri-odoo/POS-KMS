@@ -18,6 +18,7 @@ import { canTransition, type OrderStatus } from './order-status.js';
 import { resolveStayBinding, type StayBinding } from './stay-binding.js';
 import { generateOrderNumber, priceOrder } from './order-pricing.js';
 import type { CreateOrderDto, ListOrdersDto } from './dto/order.dto.js';
+import type { AuthPrincipal } from '../auth/token-verifier.js';
 
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
@@ -25,6 +26,8 @@ export type OrderWithItems = Order & { items: OrderItem[] };
 
 const ORDER_NUMBER_UNIQUE = 'orders_property_order_number_unique';
 const MAX_ORDER_NUMBER_ATTEMPTS = 3;
+/** orders.placed_by is varchar(100); usernames can be longer. */
+const PLACED_BY_MAX = 100;
 
 /** True when a (possibly Drizzle-wrapped) postgres error is a unique violation on `constraint`. */
 function isUniqueViolation(error: unknown, constraint: string): boolean {
@@ -46,7 +49,12 @@ export class OrdersService {
     @Inject(STAY_LOOKUP) private readonly stayLookup: StayLookup,
   ) {}
 
-  async create(dto: CreateOrderDto): Promise<OrderWithItems> {
+  /**
+   * @param caller the signed-in staff member. When auth is on, placedBy comes from
+   *   their token and any placedBy in the body is ignored (INTEGRATION_DESIGN.md §8.1).
+   */
+  async create(dto: CreateOrderDto, caller?: AuthPrincipal): Promise<OrderWithItems> {
+    const placedBy = caller ? caller.username.slice(0, PLACED_BY_MAX) : dto.placedBy;
     // Which stay the order is for, checked with HAIP before anything is written.
     const binding = await resolveStayBinding(this.stayLookup, dto);
 
@@ -55,7 +63,7 @@ export class OrdersService {
     let order: OrderWithItems;
     for (let attempt = 1; ; attempt++) {
       try {
-        order = await this.insertOrder(dto, binding, generateOrderNumber());
+        order = await this.insertOrder(dto, placedBy, binding, generateOrderNumber());
         break;
       } catch (error) {
         if (attempt < MAX_ORDER_NUMBER_ATTEMPTS && isUniqueViolation(error, ORDER_NUMBER_UNIQUE)) continue;
@@ -67,7 +75,7 @@ export class OrdersService {
     return order;
   }
 
-  private insertOrder(dto: CreateOrderDto, binding: StayBinding, orderNumber: string): Promise<OrderWithItems> {
+  private insertOrder(dto: CreateOrderDto, placedBy: string | undefined, binding: StayBinding, orderNumber: string): Promise<OrderWithItems> {
     return this.db.transaction(async (tx) => {
       const ids = [...new Set(dto.items.map((i) => i.menuItemId))];
       const menu = await this.menuService.findByIds(ids, dto.propertyId, tx as unknown as Db);
@@ -84,7 +92,7 @@ export class OrdersService {
           subtotal: priced.subtotal,
           currencyCode: priced.currencyCode,
           notes: dto.notes,
-          placedBy: dto.placedBy,
+          placedBy,
           ...binding,
         })
         .returning();

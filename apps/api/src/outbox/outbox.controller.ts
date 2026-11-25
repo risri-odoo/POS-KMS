@@ -1,5 +1,6 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Roles } from '../auth/roles.decorator.js';
 import { OutboxService } from './outbox.service.js';
 import { ListOutboxDto, ResolveOutboxDto } from './dto/outbox.dto.js';
 
@@ -9,6 +10,7 @@ export class OutboxController {
   constructor(private readonly outboxService: OutboxService) {}
 
   @Get()
+  @Roles('pos_manager')
   @ApiOperation({ summary: 'List HAIP folio posts for a property, newest first' })
   @ApiResponse({ status: 200, description: 'Outbox rows' })
   list(@Query() dto: ListOutboxDto) {
@@ -16,6 +18,7 @@ export class OutboxController {
   }
 
   @Post(':id/retry')
+  @Roles('pos_manager')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Re-send a needs_attention or failed post to HAIP',
@@ -34,6 +37,7 @@ export class OutboxController {
   }
 
   @Post(':id/resolve')
+  @Roles('pos_manager')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Mark a needs_attention or failed post as posted (verified manually in HAIP)' })
   @ApiQuery({ name: 'propertyId', type: String, required: true })

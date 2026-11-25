@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Roles } from '../auth/roles.decorator.js';
 import { MenuService } from './menu.service.js';
 import { CreateMenuItemDto, ListMenuItemsDto, UpdateMenuItemDto } from './dto/menu-item.dto.js';
 
@@ -9,6 +10,7 @@ export class MenuController {
   constructor(private readonly menuService: MenuService) {}
 
   @Post()
+  @Roles('pos_manager')
   @ApiOperation({ summary: 'Create a menu item' })
   @ApiResponse({ status: 201, description: 'The created menu item' })
   create(@Body() dto: CreateMenuItemDto) {
@@ -16,6 +18,7 @@ export class MenuController {
   }
 
   @Get()
+  @Roles('pos_staff', 'pos_manager')
   @ApiOperation({ summary: 'List menu items for a property' })
   @ApiResponse({ status: 200, description: 'Menu items ordered by category, sortOrder, name' })
   list(@Query() dto: ListMenuItemsDto) {
@@ -23,6 +26,7 @@ export class MenuController {
   }
 
   @Patch(':id')
+  @Roles('pos_manager')
   @ApiOperation({ summary: 'Update a menu item' })
   @ApiQuery({ name: 'propertyId', type: String, required: true })
   @ApiResponse({ status: 200, description: 'The updated menu item' })

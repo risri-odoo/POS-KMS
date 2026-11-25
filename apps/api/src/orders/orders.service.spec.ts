@@ -149,6 +149,27 @@ describe('OrdersService', () => {
       expect(inserted[0]).toMatchObject({ verificationStatus: 'unverified', haipReservationId: null, haipFolioId: null, verifiedGuestName: null });
     });
 
+    it('takes placedBy from the signed-in caller and ignores the body’s (auth on)', async () => {
+      const { capture, inserted } = capturingDb();
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup());
+      const caller = { sub: 'u1', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [PROPERTY_ID], azp: 'stayx-pos-web' };
+
+      await svc.create({ ...dto, placedBy: 'someone-else' }, caller);
+      await svc.create(dto, { ...caller, username: 'x'.repeat(150) });
+
+      expect(inserted[0]!['placedBy']).toBe('pos-staff-1');
+      expect(inserted[1]!['placedBy']).toBe('x'.repeat(100)); // fits orders.placed_by varchar(100)
+    });
+
+    it('keeps the body’s placedBy when auth is off (no caller)', async () => {
+      const { capture, inserted } = capturingDb();
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup());
+
+      await svc.create({ ...dto, placedBy: 'pos' });
+
+      expect(inserted[0]!['placedBy']).toBe('pos');
+    });
+
     it('a rejected binding writes nothing and emits nothing', async () => {
       await expect(service.create({ ...dto, unverified: undefined })).rejects.toBeInstanceOf(BadRequestException);
       expect(db.transaction).not.toHaveBeenCalled();

@@ -2,6 +2,7 @@ import { Global, Logger, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { AUTH_CONFIG, loadAuthConfig, type AuthConfig } from './auth.config.js';
 import { AuthGuard } from './auth.guard.js';
+import { RolesGuard } from './roles.guard.js';
 import { TOKEN_VERIFIER, TokenVerifier } from './token-verifier.js';
 
 /** Staff login (INTEGRATION_DESIGN.md §8). Global, so the socket gateway can reuse the verifier. */
@@ -27,7 +28,9 @@ import { TOKEN_VERIFIER, TokenVerifier } from './token-verifier.js';
       inject: [AUTH_CONFIG],
       useFactory: (config: AuthConfig) => (config.enabled ? new TokenVerifier(config) : null),
     },
+    // Run in this order: who the caller is, then what they may do.
     { provide: APP_GUARD, useClass: AuthGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
   exports: [AUTH_CONFIG, TOKEN_VERIFIER],
 })

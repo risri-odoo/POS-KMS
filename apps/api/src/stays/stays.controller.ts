@@ -1,14 +1,15 @@
 import { Controller, Get, Inject, Logger, Query, UseGuards } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Roles } from '../auth/roles.decorator.js';
 import { STAY_LOOKUP, type StayLookup } from '../haip/stay-lookup.js';
 import { LookupStaysDto } from './dto/lookup-stays.dto.js';
 import { StayLookupRateLimitGuard } from './stay-lookup-rate-limit.guard.js';
 import { toStayLookupResponse, type StayLookupResponse } from './stay-view.js';
 
 /**
- * TODO(auth, AUDIT.md §7 items 7-10): unauthenticated for now, like the rest of
- * the POS API. It reveals in-house guests' first names and initials by room, so
- * it must be behind staff login before production. The rate limit is a stopgap.
+ * Reveals in-house guests' first names and initials by room, so it is for
+ * ordering staff only (INTEGRATION_DESIGN.md §8.4), within their properties.
+ * The rate limit stays as a second line against scraping room by room.
  */
 @ApiTags('stays')
 @Controller('stays')
@@ -18,6 +19,7 @@ export class StaysController {
   constructor(@Inject(STAY_LOOKUP) private readonly stayLookup: StayLookup) {}
 
   @Get('lookup')
+  @Roles('pos_staff', 'pos_manager')
   @UseGuards(StayLookupRateLimitGuard)
   @ApiOperation({
     summary: 'In-house stays for a room, so staff can confirm the guest before ordering',
