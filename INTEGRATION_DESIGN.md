@@ -253,7 +253,7 @@ All new columns are nullable, so existing rows keep working. One migration in `P
 | POS → HAIP for verify, status and posting | **Property-scoped API key**, plus the new narrow routes R1–R5 under the API key surface | Same credential POS already uses; tenant-locked; revocable; doesn't depend on Keycloak (`H/auth/api-key.guard.ts:91-104`) |
 | POS → HAIP fallback, if HAIP prefers JWT | Service principal with a new **narrow** permission (for example `pos.stay_verify`) on the same routes | The existing `integration_reservations` profile can read every guest (`HDB/integration-principal.ts:33-37`), which is too broad |
 | Guest → POS | Opaque session token in an httpOnly cookie, stored hashed, bound to one stay; refreshed by R2 checks | No guest accounts needed; easy to revoke |
-| Staff → POS | HAIP Keycloak/OIDC login (`AUDIT.md` task 3), with POS roles in the realm | Staff identity recorded on staff-verified orders |
+| Staff → POS | HAIP Keycloak/OIDC login (`AUDIT.md` task 3), with POS client roles. **Designed in §8** | Staff identity recorded on staff-verified orders |
 | KMS socket | Staff JWT on the handshake, verified the way HAIP's `WsAuthService` does it (JWKS, issuer, audience, `azp`) | Pattern in `H/auth/ws-auth.service.ts:41-74`; the POS gateway has no auth today (`P/events/kitchen.gateway.ts:32-42`) |
 
 ### 4.7 Rate limiting and brute-force protection
@@ -509,6 +509,114 @@ Status at HAIP `83f88e5`.
 | N11 | **Keycloak's compose health check never passes.** It opens a raw TCP connection, sends an HTTP/1.1 request to `/health/ready`, then waits with `cat` for the server to close the connection. Keycloak keeps HTTP/1.1 connections alive, so `cat` never finishes and every check hits the 5 s timeout. The container stays "unhealthy" although `/health/ready` returns `UP`. So `docker-compose.auth.yml`, whose `api` waits for `keycloak: service_healthy`, can never start. Suggested fix: send `Connection: close` (or HTTP/1.0), or check the port with `curl`/`wget` if the image has one | New (found 2026-11-23) | `haip/docker-compose.yml` (service `keycloak`, `healthcheck`); `haip/docker-compose.auth.yml` (`depends_on: keycloak: condition: service_healthy`) |
 | N12 | **The documented `property_ids` mapper produces a string, which HAIP ignores.** `keycloak/README.md` gives a hardcoded-claim mapper with `jsonType.label: String` and `multivalued: true`. In Keycloak 24 that yields `"property_ids": "<uuid>"`, not an array. HAIP only reads an array (`principalFromPayload`), so the principal gets no property scope (403). What worked: `jsonType.label: JSON` with `claim.value: ["<uuid>"]`. Please fix the README and `docs/integrations/service-principal.md` | New (found 2026-11-23) | `haip/keycloak/README.md` (Property scope and example JSON); `H/auth/oidc-config.ts:130-136` |
 | N13 | **No `.dockerignore`, so host `node_modules` end up in the image.** The Dockerfile runs `pnpm install` inside the image, then copies `packages/` and `apps/api/` from the host on top. After a local `pnpm install` on the host, those folders contain the host's own `node_modules` (symlinks built for the host OS), which overwrite the image's. `docker compose up --build` then fails in the build with `MODULE_NOT_FOUND` for `tsup` (reported by the POS team; not reproduced in this review). Suggested fix: add a `.dockerignore` with at least `**/node_modules`, `**/dist` and `.git` | New (reported 2026-11-23) | No `.dockerignore` in `haip` (none at the root or anywhere in the tree, none tracked by git at `439956d`); `haip/apps/api/Dockerfile:16` (`pnpm install`) then `:20-22` (`COPY packages/`, `COPY apps/api/`) |
+| N14 | **Confirm the POS staff login design (§8).** It needs these in the shared realm: <ul><li>client `stayx-pos-api` holding the client roles `pos_staff`, `pos_kitchen` and `pos_manager`;</li><li>public clients `stayx-pos-web` and `stayx-kms-web`;</li><li>a `property_ids` user attribute for staff and kitchen-tablet accounts;</li><li>longer sessions for kitchen tablets;</li><li>a decision on who creates and disables POS users</li></ul> | New (2026-11-26) | §8.2–8.7 |
+
+---
+
+## 8. Staff login and roles for POS and KMS
+
+**Status: designed 2026-11-26 (Step A); not built yet.** The shared Keycloak realm belongs to HAIP, so **the HAIP team must confirm** the clients, roles, claims and session lengths below (§7 N14). Until then, everything is set up only on the local development realm, with `kcadm`; HAIP's files are never changed.
+
+This closes `AUDIT.md` §7 items 7–10: today the POS API, the kitchen socket and both screens have no login at all.
+
+### 8.1 Decisions
+
+| Topic | Decision |
+|---|---|
+| Identity provider | HAIP's Keycloak realm `haip`, so staff use one login for HAIP, POS and KMS. Generic OIDC providers (HAIP supports them since `846558d`) should also work, through settings |
+| Where roles live | **Client roles on the POS client** `stayx-pos-api`, not realm roles. POS owns its roles without adding to HAIP's realm role list |
+| Roles | `pos_staff`, `pos_kitchen`, `pos_manager`. No bypass for HAIP's realm `admin`: POS access always needs an explicit POS role |
+| Property scope | The `property_ids` claim (a JSON array), the same claim HAIP reads. Every request's `propertyId` must be in it |
+| Kitchen tablets | **One shared account per tablet** (for example `kitchen-t1`), role `pos_kitchen` only, `property_ids` = that tablet's hotel. Not one account per property |
+| Who places unverified orders | `pos_staff` and `pos_manager`, under the same rule as now (only when the stay lookup is unavailable or not configured, §4.3). Never `pos_kitchen` |
+| `placedBy` | Taken from the token (`preferred_username`, else `sub`), never from the screen. A `placedBy` in the request body is ignored when auth is on |
+| Default | **Auth on by default.** `POS_AUTH_ENABLED=false` turns it off for local development, with a loud startup warning. The API refuses to start with auth off when `NODE_ENV=production` |
+| Libraries | `jose` in the API (token checks against JWKS); `oidc-client-ts` in both screens (sign-in with PKCE, silent renew). Both approved 2026-11-26 |
+
+### 8.2 Keycloak clients
+
+| Client | Type | Purpose |
+|---|---|---|
+| `stayx-pos-api` | Confidential, every login flow off (it only holds roles and is the token audience) | The POS API as a resource server. Holds the client roles |
+| `stayx-pos-web` | Public, authorization code + PKCE; redirects `http://localhost:5180/*` in development | POS screen sign-in |
+| `stayx-kms-web` | Public, authorization code + PKCE; redirects `http://localhost:5181/*` in development | KMS sign-in |
+| `stayx-pos` (existing, §15) | Confidential, service account | POS → HAIP stay lookup. **Not** used for staff login; the separate name `stayx-pos-api` avoids mixing the two |
+
+**Mappers on both web clients**
+- **Audience:** `stayx-pos-api` in `aud`, added explicitly instead of relying on Keycloak adding it automatically.
+- **Client roles:** `resource_access["stayx-pos-api"].roles`.
+- **`property_ids`:** a user-attribute mapper (multivalued, JSON array). Step G must confirm it really produces an array, because the hardcoded mapper didn't (N12).
+
+### 8.3 What the API checks on every request
+
+| Check | Rule |
+|---|---|
+| Signature | RS256 against the issuer's JWKS (cached; refetched when a key id is unknown) |
+| `iss` | Equals `POS_OIDC_ISSUER` |
+| `aud` | Contains `POS_OIDC_AUDIENCE` (`stayx-pos-api`) |
+| `azp` | One of `POS_OIDC_ALLOWED_AZP` (`stayx-pos-web,stayx-kms-web`) |
+| `exp`, `nbf` | Valid, with a small clock allowance for tablets |
+| Roles | Read from `POS_OIDC_ROLES_CLAIM` (default `resource_access.stayx-pos-api.roles`; a flat `roles` array for generic providers) |
+| Property | The request's `propertyId` (query, body or path) is in `property_ids`; otherwise 403 |
+
+**Settings** (in `.env.example`, Step B):
+- `POS_AUTH_ENABLED`
+- `POS_OIDC_ISSUER`
+- `POS_OIDC_JWKS_URI` (defaults to Keycloak's `<issuer>/protocol/openid-connect/certs`)
+- `POS_OIDC_AUDIENCE`
+- `POS_OIDC_ALLOWED_AZP`
+- `POS_OIDC_ROLES_CLAIM`
+
+The screens use `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID`. The issuer must match how browsers reach the provider (§15: `http://localhost:8080/realms/haip` locally).
+
+### 8.4 Routes and roles
+
+| Route | `pos_staff` | `pos_kitchen` | `pos_manager` |
+|---|---|---|---|
+| `GET /` (service check) | public | public | public |
+| `GET /menu-items` | ✅ | — | ✅ |
+| `POST /menu-items`, `PATCH /menu-items/:id` | — | — | ✅ |
+| `GET /stays/lookup` | ✅ | — | ✅ |
+| `POST /orders` (confirmed guest) | ✅ | — | ✅ |
+| `POST /orders` with `unverified: true` | ✅ | — | ✅ |
+| `GET /orders`, `GET /orders/:id` | ✅ | ✅ | ✅ |
+| `PATCH /orders/:id/status` | — | ✅ | ✅ |
+| `GET /outbox` | — | — | ✅ |
+| `POST /outbox/:id/retry`, `POST /outbox/:id/resolve` | — | — | ✅ |
+| Swagger `/docs` | Development only; off when auth is on in production (Step H) | | |
+
+**Status changes:** these stay with the kitchen and managers, which matches today's screens. The POS screen has no status buttons, and KMS marks orders delivered. The state machine (`P/orders/order-status.ts`) still decides which moves are allowed.
+
+### 8.5 Kitchen socket
+
+- **Handshake:** the client sends its access token (`auth.token`). The gateway checks it exactly as in §8.3 and refuses the connection otherwise.
+- **`joinProperty`:** allowed for `pos_staff` (the POS recent-orders feed), `pos_kitchen` and `pos_manager`, only for a property in the token's `property_ids`.
+- **Expiry:** when the token expires the server disconnects. The client reconnects with a renewed token, rejoins and refetches, which it already does after any reconnect.
+
+### 8.6 Screens
+
+- **POS (`stayx-pos-web`):** sign in on load; the token goes on every API call and the socket. The header shows the user, their roles and Sign out. **Menu** and **Outbox/Errors** appear only for `pos_manager`. An expired session goes back to sign-in, keeping the cart if possible.
+- **KMS (`stayx-kms-web`):** signed in as its tablet account. Silent renew keeps the board running; if renew fails, the board stays visible with a "Sign in again" banner instead of going blank. The property comes from the token, so the `?propertyId=` form is no longer needed.
+- **Tablet sessions:** a longer idle and maximum session for `stayx-kms-web` (proposal: 12 hours idle, 7 days maximum; HAIP to confirm). A lost tablet is handled by disabling its account in Keycloak.
+
+### 8.7 Users and administration
+
+- **Staff users:** a person gets `pos_staff` or `pos_manager` on `stayx-pos-api`, and `property_ids` for their hotel(s). Who creates and disables them (HAIP admins or POS managers) is for the team to decide (N14, and `AUDIT.md` task 11).
+- **Tablets:** `kitchen-t1`, `kitchen-t2` and so on, each with `pos_kitchen` and one property.
+- **Development:** Step G's script creates test users `pos-staff-1`, `pos-manager-1` and `kitchen-t1` on the local realm.
+
+### 8.8 Steps (one commit each, with review before each)
+
+| Step | What | Effort |
+|---|---|---|
+| A | This design | — |
+| B | API token check: global guard, `@Public()`, settings, production refuses auth off. Tested with locally generated keys, no network | 1–1.5 days |
+| C | Roles and property scope on every route (table §8.4), `placedBy` from the token; a test that every route has a rule | 1–1.5 days |
+| D | Kitchen socket: token on the handshake, property and role on `joinProperty` | 0.5–1 day |
+| E | POS screen sign-in with `oidc-client-ts`; token on requests and socket; manager-only sections | 1.5–2 days |
+| F | KMS sign-in for tablet accounts, with silent renew and the "sign in again" banner | 1 day |
+| G | Local Keycloak setup through `kcadm` via `docker exec` from **PowerShell** (no `.sh`, no WSL), then a live check per role. Containers start only with the user's OK | 1 day + setup |
+| H | Clean-up: Swagger off with auth on in production, `AUDIT.md` items 7–10 closed, TODOs removed | 0.5 day |
 
 ---
 
