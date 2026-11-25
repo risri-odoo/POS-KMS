@@ -585,6 +585,8 @@ The screens use `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID`. The issuer must
 | `POST /outbox/:id/retry`, `POST /outbox/:id/resolve` | — | — | ✅ |
 | Swagger `/docs` | Development only; off when auth is on in production (Step H) | | |
 
+**Possible later change, not built:** `pos_kitchen` may need to mark menu items unavailable when the kitchen runs out. That would be availability only (`isAvailable`), never name, price or category, and would need its own narrow route rather than access to `PATCH /menu-items/:id`.
+
 **Status changes:** these stay with the kitchen and managers, which matches today's screens. The POS screen has no status buttons, and KMS marks orders delivered. The state machine (`P/orders/order-status.ts`) still decides which moves are allowed.
 
 ### 8.5 Kitchen socket
