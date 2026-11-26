@@ -22,6 +22,8 @@ export function authSettings(env: { VITE_OIDC_AUTHORITY?: string; VITE_OIDC_CLIE
 
 /** What the screen needs to know about the signed-in user. */
 export interface Session {
+  /** The user's stable id (the token's sub). Who a kept cart belongs to. */
+  sub: string;
   username: string;
   roles: string[];
   propertyIds: string[];
@@ -43,8 +45,10 @@ export function sessionFromAccessToken(token: string): Session {
     // leave claims empty
   }
   const access = (claims['resource_access'] ?? {}) as Record<string, { roles?: unknown } | undefined>;
-  const username = [claims['preferred_username'], claims['sub']].find((v): v is string => typeof v === 'string' && v !== '');
+  const sub = typeof claims['sub'] === 'string' ? claims['sub'] : '';
+  const username = [claims['preferred_username'], sub].find((v): v is string => typeof v === 'string' && v !== '');
   return {
+    sub,
     username: username ?? 'unknown',
     roles: strings(access[POS_API_CLIENT]?.roles),
     propertyIds: strings(claims['property_ids']),

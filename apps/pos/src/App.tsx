@@ -67,7 +67,8 @@ function SignedInPos({ requested, signedIn }: { requested: string | null; signed
     );
   }
   if (choice.kind === 'choose') return <PropertyChooser options={choice.options} onSignOut={signOut} />;
-  return <Pos propertyId={choice.propertyId} user={signedIn} />;
+  // Keyed by user: a different user always starts with a fresh screen and an empty cart.
+  return <Pos key={session.sub} propertyId={choice.propertyId} user={signedIn} />;
 }
 
 type Tab = 'order' | 'menu';
@@ -99,7 +100,7 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
   // because StrictMode runs initialisers twice; removed in the effect below.
   const [kept] = useState<CartStash | null>(() => {
     const storage = user ? tabStorage() : null;
-    return storage ? peekCartStash(storage, propertyId, Date.now()) : null;
+    return storage && user ? peekCartStash(storage, propertyId, user.session.sub, Date.now()) : null;
   });
   const [notice, setNotice] = useState<NoticeMessage | null>(() =>
     kept ? { kind: 'success', text: 'Your order in progress was kept after signing in again. Confirm the guest again before placing it.' } : null,
@@ -113,13 +114,15 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
   // What to keep if the session ends while this order is being built.
   const inProgress = useRef({ cart, roomNumber, orderNotes });
   inProgress.current = { cart, roomNumber, orderNotes };
+  const userSub = user?.session.sub ?? null;
   useEffect(() => {
     const storage = tabStorage();
-    if (!user || !storage) return;
+    if (userSub === null || !storage) return;
+    // Used (or not ours): either way it must not come back later.
     clearCartStash(storage);
-    setBeforeSignIn(() => saveCartStash(storage, { propertyId, ...inProgress.current, savedAt: Date.now() }));
+    setBeforeSignIn(() => saveCartStash(storage, { propertyId, userSub, ...inProgress.current, savedAt: Date.now() }));
     return () => setBeforeSignIn(null);
-  }, [user, propertyId]);
+  }, [userSub, propertyId]);
   const [submitting, setSubmitting] = useState(false);
 
   const notify = useCallback((kind: NoticeMessage['kind'], text: string) => setNotice({ kind, text }), []);

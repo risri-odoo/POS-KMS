@@ -35,7 +35,7 @@ describe('sessionFromAccessToken', () => {
       resource_access: { 'stayx-pos-api': { roles: ['pos_staff'] }, account: { roles: ['manage-account'] } },
       property_ids: [A],
     });
-    expect(sessionFromAccessToken(token)).toEqual({ username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [A] });
+    expect(sessionFromAccessToken(token)).toEqual({ sub: 'id-1', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [A] });
   });
 
   it('handles non-ASCII names and falls back to sub', () => {
@@ -44,7 +44,7 @@ describe('sessionFromAccessToken', () => {
   });
 
   it('gives an empty session for a malformed token, never throws', () => {
-    expect(sessionFromAccessToken('garbage')).toEqual({ username: 'unknown', roles: [], propertyIds: [] });
+    expect(sessionFromAccessToken('garbage')).toEqual({ sub: '', username: 'unknown', roles: [], propertyIds: [] });
     expect(sessionFromAccessToken(tokenWith({ property_ids: A, resource_access: { 'stayx-pos-api': { roles: 'pos_manager' } } }))).toMatchObject({
       roles: [],
       propertyIds: [],

@@ -3,7 +3,7 @@ import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts';
 import { Button } from '@stayx/ui';
 import { AccountScreen, SigningIn } from '../components/AccountScreens.js';
 import { runBeforeSignIn, setAuthHooks } from './auth-hooks.js';
-import { clearCartStash } from './cart-stash.js';
+import { signOutClearingCart } from './cart-stash.js';
 import { safeReturnPath, sessionFromAccessToken, type AuthSettings, type Session } from './session.js';
 
 export interface SignedIn {
@@ -123,8 +123,13 @@ export function AuthGate({ settings, children }: { settings: OidcSettings; child
   }
 
   const signOut = () => {
-    clearCartStash(window.sessionStorage);
-    void managerFor(settings).signoutRedirect();
+    let storage: Storage | null = null;
+    try {
+      storage = window.sessionStorage;
+    } catch {
+      // blocked storage: nothing was kept there
+    }
+    void signOutClearingCart(storage, () => managerFor(settings).signoutRedirect()).catch(() => undefined);
   };
   return <>{children({ session: state.session, signOut })}</>;
 }
