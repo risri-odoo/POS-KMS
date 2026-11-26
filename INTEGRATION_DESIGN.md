@@ -602,7 +602,7 @@ The screens use `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID`. The issuer must
 - **POS (`stayx-pos-web`):** sign in on load; the token goes on every API call and the socket. The header shows the user, their roles and Sign out. **Menu** and **Outbox/Errors** appear only for `pos_manager`. An expired session goes back to sign-in, keeping the cart if possible.
 - **KMS (`stayx-kms-web`):** signed in as its tablet account. Silent renew keeps the board running; if renew fails, the board stays visible with a "Sign in again" banner instead of going blank. The property comes from the token, so the `?propertyId=` form is no longer needed.
 - **Tablet sessions:** a longer idle and maximum session for `stayx-kms-web` (proposal: 12 hours idle, 7 days maximum; HAIP to confirm). A lost tablet is handled by disabling its account in Keycloak.
-- **Where tokens are kept (Step F; to be confirmed):** KMS keeps them in `localStorage`, so a tablet stays signed in across a browser restart. The trade-off: a script injected into the page could read them (`pos_kitchen` for one hotel). The POS keeps them in `sessionStorage` (this tab only), since shared terminals change hands. Switching KMS to `sessionStorage` is a one-line change if the team prefers re-signing after every restart.
+- **Where tokens are kept: decided 2026-11-26.** KMS keeps them in `localStorage`, so a tablet stays signed in across a browser restart. Accepted because the account is per tablet and kitchen-only (`pos_kitchen`, one hotel: it can read that hotel's orders and move their status, nothing else), its sessions are limited by Keycloak (idle and maximum lifetime, §8.6 tablet sessions), and a lost or compromised tablet is cut off by disabling its account. The remaining risk, a script injected into the page reading the token, is reduced by a strict Content-Security-Policy (Step H) and refresh token rotation (Step G). The POS keeps tokens in `sessionStorage` (this tab only), since shared terminals change hands.
 - **When the KMS session ends** (renewal failed, a 401, or the socket refused): the board stays visible with a "Sign in again" banner; a quiet renewal is retried every minute, so a Wi-Fi drop recovers by itself.
 
 ### 8.7 Users and administration
@@ -621,8 +621,8 @@ The screens use `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID`. The issuer must
 | D | Kitchen socket: token on the handshake, property and role on `joinProperty` | 0.5–1 day |
 | E | POS screen sign-in with `oidc-client-ts`; token on requests and socket; manager-only sections | 1.5–2 days |
 | F | KMS sign-in for tablet accounts, with silent renew and the "sign in again" banner | 1 day |
-| G | Local Keycloak setup through `kcadm` via `docker exec` from **PowerShell** (no `.sh`, no WSL), then a live check per role. Containers start only with the user's OK | 1 day + setup |
-| H | Clean-up: Swagger off with auth on in production, `AUDIT.md` items 7–10 closed, TODOs removed | 0.5 day |
+| G | Local Keycloak setup through `kcadm` via `docker exec` from **PowerShell** (no `.sh`, no WSL), then a live check per role. **Refresh token rotation** for the screen clients (a refresh token can be used once; reuse ends the session). Containers start only with the user's OK | 1 day + setup |
+| H | Clean-up: Swagger off with auth on in production, `AUDIT.md` items 7–10 closed, TODOs removed (incl. sharing the POS/KMS session helpers). **Strict Content-Security-Policy** on the POS and KMS pages: scripts only from the page's own origin, no inline or third-party scripts, `connect-src` limited to the API and the identity provider | 0.5–1 day |
 
 ---
 
