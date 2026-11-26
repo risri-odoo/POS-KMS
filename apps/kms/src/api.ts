@@ -1,4 +1,5 @@
 import { API_URL } from './config.js';
+import { authHooks } from './auth/auth-hooks.js';
 import { ACTIVE_STATUSES, isActiveStatus, type Order, type OrderStatus, type OrderWithItems } from './types.js';
 
 /** An HTTP error from the API, keeping the status so callers can react to 400/409. */
@@ -12,11 +13,24 @@ export class ApiError extends Error {
   }
 }
 
+export const SIGNED_OUT_MESSAGE = 'Signed out: sign in again to update orders';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const hooks = authHooks();
+  const token = hooks ? await hooks.getToken().catch(() => null) : null;
   const res = await fetch(`${API_URL}${path}`, {
     ...init,
-    headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
+    headers: {
+      Accept: 'application/json',
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
   });
+  if (res.status === 401 && hooks) {
+    // The board keeps showing; AuthGate shows "Sign in again" (§8.6).
+    hooks.sessionEnded();
+    throw new ApiError(401, SIGNED_OUT_MESSAGE);
+  }
   if (!res.ok) {
     let message = `${res.status} ${res.statusText}`;
     try {

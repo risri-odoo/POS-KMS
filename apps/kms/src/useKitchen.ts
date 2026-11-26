@@ -3,6 +3,7 @@ import { io } from 'socket.io-client';
 import { ApiError, fetchActiveBoard, getOrder, updateOrderStatus } from './api.js';
 import { boardReducer, initialBoardState, needsFetch } from './board.js';
 import { SOCKET_URL } from './config.js';
+import { authHooks, socketAuth } from './auth/auth-hooks.js';
 import type { Order, OrderStatus, OrderWithItems, RoomAck } from './types.js';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
@@ -11,6 +12,11 @@ interface Options {
   propertyId: string;
   /** Called for each live order.created (used for the beep). */
   onOrderCreated?: (order: OrderWithItems) => void;
+  /**
+   * Goes up each time a new access token is loaded (login on). A socket that was
+   * refused or ended for an expired token reconnects then, rejoins and refetches.
+   */
+  sessionVersion?: number;
 }
 
 function messageOf(error: unknown): string {
@@ -23,7 +29,7 @@ function messageOf(error: unknown): string {
  * On EVERY socket "connect" (first connect and each reconnect, since rooms are
  * lost on reconnect) it joins the property room and then refetches the board.
  */
-export function useKitchen({ propertyId, onOrderCreated }: Options) {
+export function useKitchen({ propertyId, onOrderCreated, sessionVersion = 0 }: Options) {
   const [board, dispatch] = useReducer(boardReducer, initialBoardState);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
   const [message, setMessage] = useState<string | null>(null);
@@ -35,6 +41,7 @@ export function useKitchen({ propertyId, onOrderCreated }: Options) {
   const onCreatedRef = useRef(onOrderCreated);
   onCreatedRef.current = onOrderCreated;
   const refetchGeneration = useRef(0);
+  const socketRef = useRef<ReturnType<typeof io> | null>(null);
 
   const refetch = useCallback(async () => {
     const generation = ++refetchGeneration.current;
@@ -61,7 +68,9 @@ export function useKitchen({ propertyId, onOrderCreated }: Options) {
   );
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    // auth is a function, so every reconnect sends the latest (renewed) token.
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], auth: socketAuth });
+    socketRef.current = socket;
     setConnection('connecting');
 
     socket.on('connect', async () => {
@@ -79,8 +88,21 @@ export function useKitchen({ propertyId, onOrderCreated }: Options) {
       await refetch();
     });
 
-    socket.on('disconnect', () => setConnection('disconnected'));
-    socket.on('connect_error', () => setConnection('disconnected'));
+    socket.on('disconnect', (reason) => {
+      setConnection('disconnected');
+      // The server ends the socket when the token expires (§8.5); Socket.IO doesn't
+      // reconnect by itself after that. Silent renew has usually run by then.
+      if (reason === 'io server disconnect') socket.connect();
+    });
+    socket.on('connect_error', (error) => {
+      setConnection('disconnected');
+      if (socket.active) return; // a network problem: Socket.IO keeps retrying by itself
+      // Refused by the server's login check, which Socket.IO never retries. The
+      // reconnect happens when a new token arrives (sessionVersion).
+      const hooks = authHooks();
+      if (error.message === 'unauthorized' && hooks) hooks.sessionEnded();
+      else setMessage(`Kitchen channel refused: ${error.message}`);
+    });
 
     socket.on('order.created', (order: OrderWithItems) => {
       if (order?.propertyId !== propertyId) return;
@@ -98,10 +120,17 @@ export function useKitchen({ propertyId, onOrderCreated }: Options) {
     });
 
     return () => {
+      socketRef.current = null;
       socket.removeAllListeners();
       socket.disconnect();
     };
   }, [propertyId, refetch, loadOne]);
+
+  // A new token after the socket was refused or cut: connect again with it.
+  useEffect(() => {
+    const socket = socketRef.current;
+    if (socket && !socket.connected && !socket.active) socket.connect();
+  }, [sessionVersion]);
 
   const changeStatus = useCallback(
     async (id: string, status: OrderStatus) => {

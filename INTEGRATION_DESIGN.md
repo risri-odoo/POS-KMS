@@ -602,6 +602,8 @@ The screens use `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID`. The issuer must
 - **POS (`stayx-pos-web`):** sign in on load; the token goes on every API call and the socket. The header shows the user, their roles and Sign out. **Menu** and **Outbox/Errors** appear only for `pos_manager`. An expired session goes back to sign-in, keeping the cart if possible.
 - **KMS (`stayx-kms-web`):** signed in as its tablet account. Silent renew keeps the board running; if renew fails, the board stays visible with a "Sign in again" banner instead of going blank. The property comes from the token, so the `?propertyId=` form is no longer needed.
 - **Tablet sessions:** a longer idle and maximum session for `stayx-kms-web` (proposal: 12 hours idle, 7 days maximum; HAIP to confirm). A lost tablet is handled by disabling its account in Keycloak.
+- **Where tokens are kept (Step F; to be confirmed):** KMS keeps them in `localStorage`, so a tablet stays signed in across a browser restart. The trade-off: a script injected into the page could read them (`pos_kitchen` for one hotel). The POS keeps them in `sessionStorage` (this tab only), since shared terminals change hands. Switching KMS to `sessionStorage` is a one-line change if the team prefers re-signing after every restart.
+- **When the KMS session ends** (renewal failed, a 401, or the socket refused): the board stays visible with a "Sign in again" banner; a quiet renewal is retried every minute, so a Wi-Fi drop recovers by itself.
 
 ### 8.7 Users and administration
 
