@@ -1,4 +1,5 @@
 import { API_URL } from './config.js';
+import { authHooks } from './auth/auth-hooks.js';
 import type {
   CreateMenuItemBody,
   MenuItem,
@@ -21,15 +22,27 @@ export class ApiError extends Error {
   }
 }
 
+export const SESSION_ENDED_MESSAGE = 'Your session has ended. Signing you in again…';
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const hooks = authHooks();
+  const token = hooks ? await hooks.getToken().catch(() => null) : null;
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, {
       ...init,
-      headers: { Accept: 'application/json', ...(init?.body ? { 'Content-Type': 'application/json' } : {}) },
+      headers: {
+        Accept: 'application/json',
+        ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
   } catch {
     throw new ApiError(0, 'Cannot reach the POS server. Check the connection and try again.');
+  }
+  if (res.status === 401 && hooks) {
+    hooks.sessionEnded();
+    throw new ApiError(401, SESSION_ENDED_MESSAGE);
   }
   if (!res.ok) {
     let message = res.statusText || `Request failed (${res.status})`;

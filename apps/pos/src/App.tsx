@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
-import { AlertTriangle, ClipboardList, UtensilsCrossed } from 'lucide-react';
-import { AppShell, HeaderDate, type NavSection } from '@stayx/ui';
+import { AlertTriangle, ClipboardList, LogOut, UtensilsCrossed } from 'lucide-react';
+import { AppShell, Button, HeaderDate, type NavSection } from '@stayx/ui';
 import { version } from '../package.json';
 import { ApiError, listMenu, lookupStays, messageOf, placeOrder } from './api.js';
 import { initialStayConfirm, orderBinding, stayConfirmReducer } from './stay-confirm.js';
@@ -14,30 +14,77 @@ import { Notice, type NoticeMessage } from './components/Notice.js';
 import { PropertyForm } from './components/PropertyForm.js';
 import type { MenuItem } from './types.js';
 import { useOrdersFeed } from './useOrdersFeed.js';
+import { AuthGate, type SignedIn } from './auth/AuthGate.js';
+import { setBeforeSignIn } from './auth/auth-hooks.js';
+import { clearCartStash, peekCartStash, saveCartStash, type CartStash } from './auth/cart-stash.js';
+import { authSettings, canManage, canOrder, pickProperty, roleLabels } from './auth/session.js';
+import { AccountScreen, PropertyChooser } from './components/AccountScreens.js';
+
+/** Read once: AuthGate's effect depends on this object staying the same. */
+const AUTH = authSettings(import.meta.env);
+
+/** sessionStorage, or null where the browser blocks it. */
+function tabStorage(): Storage | null {
+  try {
+    return window.sessionStorage;
+  } catch {
+    return null;
+  }
+}
 
 export function App() {
-  const propertyId = resolvePropertyId(window.location.search, import.meta.env.VITE_DEFAULT_PROPERTY_ID);
-  if (!propertyId) {
-    return <PropertyForm initial={new URLSearchParams(window.location.search).get('propertyId') ?? ''} />;
+  const requested = resolvePropertyId(window.location.search, import.meta.env.VITE_DEFAULT_PROPERTY_ID);
+  if (!AUTH.enabled) {
+    // Login off (local development): as before, any property.
+    if (!requested) {
+      return <PropertyForm initial={new URLSearchParams(window.location.search).get('propertyId') ?? ''} />;
+    }
+    return <Pos propertyId={requested} user={null} />;
   }
-  return <Pos propertyId={propertyId} />;
+  return <AuthGate settings={AUTH}>{(signedIn) => <SignedInPos requested={requested} signedIn={signedIn} />}</AuthGate>;
+}
+
+/** Roles and hotels from the token decide what opens (§8.6). The API enforces the same rules. */
+function SignedInPos({ requested, signedIn }: { requested: string | null; signedIn: SignedIn }) {
+  const { session, signOut } = signedIn;
+  if (!canOrder(session.roles)) {
+    return (
+      <AccountScreen title="This account can't take orders" onSignOut={signOut}>
+        <p className="text-sm text-telivity-slate">
+          {session.username} has no POS ordering role (Staff or Manager)
+          {session.roles.length > 0 ? `; it has: ${roleLabels(session.roles)}` : ''}. Ask a manager to add the role, or sign
+          in with another account.
+        </p>
+      </AccountScreen>
+    );
+  }
+  const choice = pickProperty(requested, session.propertyIds);
+  if (choice.kind === 'none') {
+    return (
+      <AccountScreen title="No hotel is assigned to this account" onSignOut={signOut}>
+        <p className="text-sm text-telivity-slate">Ask a manager to give {session.username} access to a hotel.</p>
+      </AccountScreen>
+    );
+  }
+  if (choice.kind === 'choose') return <PropertyChooser options={choice.options} onSignOut={signOut} />;
+  return <Pos propertyId={choice.propertyId} user={signedIn} />;
 }
 
 type Tab = 'order' | 'menu';
 
-function tabFromHash(): Tab {
-  return window.location.hash === '#menu' ? 'menu' : 'order';
+function tabFromHash(canEditMenu: boolean): Tab {
+  return canEditMenu && window.location.hash === '#menu' ? 'menu' : 'order';
 }
 
-/** Plain hash links: the active tab lives in the URL, no router. */
-function navFor(tab: Tab): NavSection[] {
+/**
+ * Plain hash links: the active tab lives in the URL, no router. Menu editing and the
+ * back office are for managers only (§8.6); with login off everything shows, as before.
+ */
+export function navFor(tab: Tab, isManager: boolean): NavSection[] {
+  const orders = { href: '#order', label: 'Orders', icon: ClipboardList, active: tab === 'order' };
+  if (!isManager) return [{ items: [orders] }];
   return [
-    {
-      items: [
-        { href: '#order', label: 'Orders', icon: ClipboardList, active: tab === 'order' },
-        { href: '#menu', label: 'Menu', icon: UtensilsCrossed, active: tab === 'menu' },
-      ],
-    },
+    { items: [orders, { href: '#menu', label: 'Menu', icon: UtensilsCrossed, active: tab === 'menu' }] },
     {
       title: 'Back office',
       items: [{ href: '#outbox', label: 'Outbox/Errors', icon: AlertTriangle, disabled: true, hint: 'Soon' }],
@@ -45,14 +92,34 @@ function navFor(tab: Tab): NavSection[] {
   ];
 }
 
-function Pos({ propertyId }: { propertyId: string }) {
-  const [tab, setTab] = useState<Tab>(tabFromHash);
-  const [notice, setNotice] = useState<NoticeMessage | null>(null);
+function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }) {
+  const isManager = user ? canManage(user.session.roles) : true;
+  const [tab, setTab] = useState<Tab>(() => tabFromHash(isManager));
+  // After signing in again, the order that was being built (§8.6). Read without removing,
+  // because StrictMode runs initialisers twice; removed in the effect below.
+  const [kept] = useState<CartStash | null>(() => {
+    const storage = user ? tabStorage() : null;
+    return storage ? peekCartStash(storage, propertyId, Date.now()) : null;
+  });
+  const [notice, setNotice] = useState<NoticeMessage | null>(() =>
+    kept ? { kind: 'success', text: 'Your order in progress was kept after signing in again. Confirm the guest again before placing it.' } : null,
+  );
   const [menu, setMenu] = useState<MenuItem[] | null>(null);
-  const [cart, dispatchCart] = useReducer(cartReducer, emptyCart);
-  const [roomNumber, setRoomNumber] = useState('');
+  const [cart, dispatchCart] = useReducer(cartReducer, kept?.cart ?? emptyCart);
+  const [roomNumber, setRoomNumber] = useState(kept?.roomNumber ?? '');
   const [stay, dispatchStay] = useReducer(stayConfirmReducer, initialStayConfirm);
-  const [orderNotes, setOrderNotes] = useState('');
+  const [orderNotes, setOrderNotes] = useState(kept?.orderNotes ?? '');
+
+  // What to keep if the session ends while this order is being built.
+  const inProgress = useRef({ cart, roomNumber, orderNotes });
+  inProgress.current = { cart, roomNumber, orderNotes };
+  useEffect(() => {
+    const storage = tabStorage();
+    if (!user || !storage) return;
+    clearCartStash(storage);
+    setBeforeSignIn(() => saveCartStash(storage, { propertyId, ...inProgress.current, savedAt: Date.now() }));
+    return () => setBeforeSignIn(null);
+  }, [user, propertyId]);
   const [submitting, setSubmitting] = useState(false);
 
   const notify = useCallback((kind: NoticeMessage['kind'], text: string) => setNotice({ kind, text }), []);
@@ -63,10 +130,10 @@ function Pos({ propertyId }: { propertyId: string }) {
   cartRef.current = cart;
 
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash());
+    const onHash = () => setTab(tabFromHash(isManager));
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
-  }, []);
+  }, [isManager]);
 
   // The latest menu, so successive updates (e.g. optimistic toggle, then the
   // server's row) compose instead of each starting from a stale render.
@@ -177,7 +244,7 @@ function Pos({ propertyId }: { propertyId: string }) {
     <AppShell
       brand="StayX POS"
       tagline="Room service"
-      nav={navFor(tab)}
+      nav={navFor(tab, isManager)}
       connection={connection}
       fill
       mainClassName={`overflow-y-auto p-3 sm:p-4 lg:p-6 ${tab === 'order' ? 'lg:overflow-hidden' : ''}`}
@@ -189,6 +256,23 @@ function Pos({ propertyId }: { propertyId: string }) {
           </span>
           <HeaderDate />
         </>
+      }
+      headerEnd={
+        user ? (
+          <div className="flex items-center gap-2 text-sm">
+            <span className="hidden text-right leading-tight sm:block">
+              <span className="block font-semibold text-telivity-navy">{user.session.username}</span>
+              <span className="block text-xs text-telivity-slate">{roleLabels(user.session.roles)}</span>
+            </span>
+            <Button variant="ghost" icon={LogOut} onClick={user.signOut} title="Sign out">
+              Sign out
+            </Button>
+          </div>
+        ) : (
+          <span className="rounded-lg border border-telivity-orange px-2 py-1 text-xs font-semibold text-telivity-orange" title="POS_AUTH_ENABLED=false and no VITE_OIDC_AUTHORITY: development only">
+            Login off
+          </span>
+        )
       }
       banner={
         connection === 'disconnected' && (

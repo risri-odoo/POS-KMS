@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { io } from 'socket.io-client';
 import { listOrders, messageOf } from './api.js';
 import { SOCKET_URL } from './config.js';
+import { authHooks, socketAuth } from './auth/auth-hooks.js';
 import { feedReducer, initialFeedState, recentOrders } from './orders-feed.js';
 import type { Order, OrderWithItems, RoomAck } from './types.js';
 
@@ -34,7 +35,8 @@ export function useOrdersFeed(propertyId: string, onError: (message: string) => 
   }, [propertyId]);
 
   useEffect(() => {
-    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'] });
+    // auth is a function, so every reconnect sends the latest (renewed) token.
+    const socket = io(SOCKET_URL, { transports: ['websocket', 'polling'], auth: socketAuth });
     setConnection('connecting');
 
     socket.on('connect', async () => {
@@ -51,8 +53,20 @@ export function useOrdersFeed(propertyId: string, onError: (message: string) => 
       }
       await refetch();
     });
-    socket.on('disconnect', () => setConnection('disconnected'));
-    socket.on('connect_error', () => setConnection('disconnected'));
+    socket.on('disconnect', (reason) => {
+      setConnection('disconnected');
+      // The server ends the socket when the token expires (§8.5). Socket.IO doesn't
+      // reconnect by itself after that; reconnect now, with the renewed token.
+      if (reason === 'io server disconnect') socket.connect();
+    });
+    socket.on('connect_error', (error) => {
+      setConnection('disconnected');
+      if (socket.active) return; // a network problem: Socket.IO keeps retrying by itself
+      // Refused by the server's login check, which Socket.IO never retries.
+      const hooks = authHooks();
+      if (error.message === 'unauthorized' && hooks) hooks.sessionEnded();
+      else onErrorRef.current(`Live updates refused (${error.message}). Orders can still be placed.`);
+    });
 
     socket.on('order.created', (order: OrderWithItems) => {
       if (order?.propertyId === propertyId) dispatch({ type: 'upsert', order });

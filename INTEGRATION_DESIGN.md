@@ -542,6 +542,8 @@ This closes `AUDIT.md` §7 items 7–10: today the POS API, the kitchen socket a
 | `stayx-kms-web` | Public, authorization code + PKCE; redirects `http://localhost:5181/*` in development | KMS sign-in |
 | `stayx-pos` (existing, §15) | Confidential, service account | POS → HAIP stay lookup. **Not** used for staff login; the separate name `stayx-pos-api` avoids mixing the two |
 
+**Web client settings Step G must set** (found while building Step E): valid redirect URIs `http://localhost:5180/*` and `http://localhost:5181/*`; **post-logout redirect URIs** the same (or Sign out stops on Keycloak's page); **web origins** `http://localhost:5180` and `http://localhost:5181` (the token call is made from the browser, so it needs CORS); PKCE method `S256`.
+
 **Mappers on both web clients**
 - **Audience:** `stayx-pos-api` in `aud`, added explicitly instead of relying on Keycloak adding it automatically.
 - **Client roles:** `resource_access["stayx-pos-api"].roles`.

@@ -69,5 +69,5 @@ describe('route rules (INTEGRATION_DESIGN.md §8.4)', () => {
   it('every route has exactly the roles in the design table, and none is left without a rule', async () => {
     const sorted = (rule: string) => (rule === 'public' ? rule : rule.split(', ').sort().join(', '));
     expect(await actualRules()).toEqual(Object.fromEntries(Object.entries(EXPECTED).map(([route, rule]) => [route, sorted(rule)])));
-  });
+  }, 30_000); // imports every controller and its whole module graph; slow under a parallel run
 });
