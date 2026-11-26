@@ -12,8 +12,8 @@ const P2 = 'a0000002-0000-4000-a000-000000000002';
 const ON = loadAuthConfig({ POS_OIDC_ISSUER: 'http://localhost:8080/realms/haip' });
 const OFF = loadAuthConfig({ POS_AUTH_ENABLED: 'false' });
 
-const staff: AuthPrincipal = { sub: 's', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [P1], azp: 'stayx-pos-web' };
-const kitchen: AuthPrincipal = { sub: 'k', username: 'kitchen-t1', roles: ['pos_kitchen'], propertyIds: [P1], azp: 'stayx-kms-web' };
+const staff: AuthPrincipal = { sub: 's', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [P1], azp: 'stayx-pos-web', expiresAt: 0 };
+const kitchen: AuthPrincipal = { sub: 'k', username: 'kitchen-t1', roles: ['pos_kitchen'], propertyIds: [P1], azp: 'stayx-kms-web', expiresAt: 0 };
 const twoHotels: AuthPrincipal = { ...staff, roles: ['pos_manager'], propertyIds: [P1, P2] };
 
 class Routes {

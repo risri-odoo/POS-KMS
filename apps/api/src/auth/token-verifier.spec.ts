@@ -57,7 +57,18 @@ describe('TokenVerifier', () => {
       roles: ['pos_staff'],
       propertyIds: [PROPERTY],
       azp: 'stayx-pos-web',
+      expiresAt: expect.any(Number) as number,
     });
+  });
+
+  it('refuses a token without exp', async () => {
+    const t = await new SignJWT({ azp: 'stayx-pos-web' })
+      .setProtectedHeader({ alg: 'RS256', kid: 'k1' })
+      .setIssuer(ISSUER)
+      .setAudience('stayx-pos-api')
+      .setSubject('u')
+      .sign(key);
+    expect(await reasonFor(t)).toContain('"exp"');
   });
 
   it('reads only the POS client’s roles, never another client’s or realm roles', async () => {

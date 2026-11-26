@@ -14,6 +14,8 @@ export interface AuthPrincipal {
   propertyIds: string[];
   /** The client the token was issued to, e.g. stayx-pos-web. */
   azp: string;
+  /** The token's exp (seconds since the epoch). The kitchen socket disconnects then (§8.5). */
+  expiresAt: number;
 }
 
 /** A token that must be refused. The reason is for the server log, not the caller. */
@@ -57,6 +59,8 @@ export class TokenVerifier {
         audience: this.config.audience,
         algorithms: ['RS256'],
         clockTolerance: this.config.clockToleranceSeconds,
+        // A token that never expires would keep a socket open forever.
+        requiredClaims: ['exp'],
       }));
     } catch (error) {
       throw new InvalidTokenError(reasonOf(error));
@@ -75,6 +79,7 @@ export class TokenVerifier {
       roles: strings(claimAt(payload, this.config.rolesClaim)),
       propertyIds: strings(payload['property_ids']),
       azp,
+      expiresAt: payload.exp!,
     };
   }
 }

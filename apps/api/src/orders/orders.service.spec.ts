@@ -152,7 +152,7 @@ describe('OrdersService', () => {
     it('takes placedBy from the signed-in caller and ignores the body’s (auth on)', async () => {
       const { capture, inserted } = capturingDb();
       const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup());
-      const caller = { sub: 'u1', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [PROPERTY_ID], azp: 'stayx-pos-web' };
+      const caller = { sub: 'u1', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [PROPERTY_ID], azp: 'stayx-pos-web', expiresAt: 0 };
 
       await svc.create({ ...dto, placedBy: 'someone-else' }, caller);
       await svc.create(dto, { ...caller, username: 'x'.repeat(150) });

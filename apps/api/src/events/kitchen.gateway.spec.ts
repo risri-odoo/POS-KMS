@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { Socket } from 'socket.io';
+import { loadAuthConfig } from '../auth/auth.config.js';
 import { KitchenGateway, roomFor } from './kitchen.gateway.js';
 
 const PROPERTY_A = '11111111-1111-4111-8111-111111111111';
@@ -23,7 +24,8 @@ describe('KitchenGateway', () => {
   let socket: ReturnType<typeof fakeSocket>;
 
   beforeEach(() => {
-    gateway = new KitchenGateway();
+    // Login off: the behaviour before Step D. Login on is tested in kitchen.gateway.auth.spec.ts.
+    gateway = new KitchenGateway(loadAuthConfig({ POS_AUTH_ENABLED: 'false' }), null);
     socket = fakeSocket();
   });
 

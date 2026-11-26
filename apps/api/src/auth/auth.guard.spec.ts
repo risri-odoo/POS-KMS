@@ -6,7 +6,7 @@ import { AuthGuard, type AuthenticatedRequest } from './auth.guard.js';
 import { InvalidTokenError, type AuthPrincipal, type TokenVerifier } from './token-verifier.js';
 import { Public } from './public.decorator.js';
 
-const PRINCIPAL: AuthPrincipal = { sub: 'u1', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: ['p1'], azp: 'stayx-pos-web' };
+const PRINCIPAL: AuthPrincipal = { sub: 'u1', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: ['p1'], azp: 'stayx-pos-web', expiresAt: 0 };
 const ON = loadAuthConfig({ POS_OIDC_ISSUER: 'http://localhost:8080/realms/haip' });
 const OFF = loadAuthConfig({ POS_AUTH_ENABLED: 'false' });
 
