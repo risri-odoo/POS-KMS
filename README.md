@@ -83,5 +83,6 @@ A **NestJS API** (`apps/api`, port 4000) stores the menu, orders and an outbox o
 | `pnpm dev:all` | Run API + kitchen + POS together |
 | `pnpm dev` / `pnpm dev:kms` / `pnpm dev:pos` | Run just one of them |
 | `pnpm seed:demo` | Add the demo menu (idempotent) |
+| `pnpm --filter @stayx/api test:e2e` | Integration test: real API against a throwaway database (`stayx_pos_e2e`) and Redis database 3, with a fake HAIP. Needs the docker-compose containers running |
 | `pnpm typecheck` / `pnpm test` | Type-check / run all tests |
 | `pnpm docker:down` | Stop the database containers |
