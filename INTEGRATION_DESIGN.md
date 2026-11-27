@@ -513,6 +513,7 @@ Status at HAIP `83f88e5`.
 | N15 | **Refresh token rotation is realm-wide in Keycloak 24.** There is no per-client setting: the token code reads only the realm's `revokeRefreshToken` and `refreshTokenMaxReuse`. We recommend turning rotation on in production (each refresh token works once; reuse ends the session), since KMS tablets keep tokens in `localStorage` (§8.6). Before that, please test the dashboard with several tabs open: with rotation on, tabs of the same user share one session, so a renewal in one tab makes the other tab's refresh token invalid and that tab has to sign in again (normally silently, through the Keycloak session). Left off on our local realm for now | New (2026-11-27) | Keycloak 24.0.5 `OIDCConfigAttributes` (no such client attribute); `TokenManager` reads `isRevokeRefreshToken` / `getRefreshTokenMaxReuse` (`AUDIT.md` §17) |
 | N16 | **The 10-hour realm session maximum is too short for kitchen tablets.** A client can't have a longer session than the realm: Keycloak sets a client session's maximum to the smaller of the client's own value and the realm's SSO session maximum, so `stayx-kms-web` can't get the 12 h idle / 7 day maximum proposed in §8.6. Silent renewal keeps the 30-minute idle limit from being hit while a board is open, but the tablet must sign in again at least every 10 hours. Please raise the realm's SSO session maximum, or suggest an alternative (for example offline tokens for the kitchen client only, with their own idle and maximum limits) | New (2026-11-27) | `haip/keycloak/haip-realm.json` (`ssoSessionMaxLifespan: 36000`, `ssoSessionIdleTimeout: 1800`); Keycloak 24.0.5 `SessionExpirationUtils.calculateClientSessionMaxLifespanTimestamp` (`Math.min` with the user session maximum) |
 | N17 | **The auth-on HAIP instance on port 3001 isn't an allowed redirect for `haip-dashboard`.** The realm allows only `http://localhost:5173/*` and `http://localhost:3000/*`, so signing in to the dashboard served by `haip-api-auth` (host port 3001) fails with an invalid redirect URI, whatever the other settings. Please add `http://localhost:3001/*` (and its web origin), or serve the auth-on dashboard on an allowed port | New (2026-11-27) | `haip/keycloak/haip-realm.json` (`haip-dashboard.redirectUris`); `haip-api-auth` container (port `127.0.0.1:3001 → 3000`) |
+| N18 | **May POS send manager alerts through HAIP's messaging?** For WhatsApp (and SMS) alerts to hotel managers about charges that need attention (§9), POS could call `POST /notifications/whatsapp` / `/sms`. Those need `communications.manage`, which allows any message to anyone. Could HAIP offer a narrower permission or route (e.g. only to a hotel's staff contacts, with HAIP's consent handling), and who pays for the messages? There is no email route; we would send email ourselves | New (2026-11-28) | `haip/apps/api/src/modules/notifications/notifications.controller.ts` (`@Post('whatsapp')`, `@Post('sms')`, `@RequirePermissions('communications.manage')`) |
 
 ---
 
@@ -629,6 +630,44 @@ The screens use `VITE_OIDC_AUTHORITY` and `VITE_OIDC_CLIENT_ID`. The issuer must
 | H | Clean-up: Swagger off with auth on in production, `AUDIT.md` items 7–10 closed, TODOs removed (incl. sharing the POS/KMS session helpers). **Strict Content-Security-Policy** on the POS and KMS pages: scripts only from the page's own origin, no inline or third-party scripts, `connect-src` limited to the API and the identity provider | 0.5–1 day |
 
 ---
+
+## 9. Alerts outside the POS: email / WhatsApp (design only, A3)
+
+**Status: designed 2026-11-28; not built.** Inside the POS, managers already see the count on Outbox/Errors, the tab title and a banner when HAIP posting is off (A1, A2). This section is about reaching a manager who isn't looking at a POS screen.
+
+### 9.1 What sends a message
+
+- **Trigger:** a hotel's count of charges needing attention (needs attention, failed, stuck; `OutboxAlerts.summary`) has been above 0 for longer than `ALERT_NOTIFY_AFTER_MINUTES` (proposal: 15). A newly failed charge doesn't trigger at once, so a short HAIP outage that recovers by itself sends nothing.
+- **At most one message per hotel per `ALERT_NOTIFY_EVERY_MINUTES`** (proposal: 60) while the count stays above 0. The next message only goes out if the count went up, or the window passed.
+- **Also:** one message when HAIP posting is switched off in production (`bridgeEnabled` false). Never one for development.
+- **Content:** the hotel name, the counts ("3 charges need attention: 2 stay ended, 1 failed; oldest 2 h"), and a link to Outbox/Errors. **No guest names, rooms or amounts.** The link opens the POS, which needs sign-in.
+
+### 9.2 How it runs
+
+- **A repeatable BullMQ job** every 5 minutes, using the existing Redis and the queue connection. It checks each active hotel's summary and the "last sent" time.
+- **The "last sent" time is kept in Redis** (`stayx:alert-sent:<hotel>`, with an expiry), so several API processes send once, not once each.
+- **New table `alert_contacts`:** hotel id, channel (`email` or `whatsapp`), the address or number, active, and when consent was given. Managed with `scripts/property.mjs` (no screen at first).
+- **A send log in a new table `alert_deliveries`:** hotel, channel, when, outcome. Never the message body or the address in plain text in the logs.
+
+### 9.3 Providers (open: needs a decision)
+
+| Option | For | Against |
+|---|---|---|
+| **A. HAIP's `POST /notifications/whatsapp` and `/sms`** | No new vendor; HAIP already has the provider and its consent handling | Needs `communications.manage` for our service principal, which is broad (any message to anyone). Ask HAIP for a narrower permission or route (§7 N18). No email route in HAIP |
+| **B. Our own email (SMTP)** | Simple, no guest data, works without HAIP | A new package (e.g. `nodemailer`) and SMTP credentials; mail may land in spam |
+| **C. Both: email ourselves, WhatsApp through HAIP** | Each channel where it fits | Two set-ups |
+
+**Recommendation:** start with B (email), since it needs nothing from HAIP. Add WhatsApp through HAIP (A) once N18 is answered. Either way, any new package needs your OK first.
+
+### 9.4 Before building
+
+- **Decide:**
+  - who receives alerts, per hotel;
+  - which channel first;
+  - the two timings above;
+  - consent wording for WhatsApp numbers.
+- **Privacy:** the contact list holds staff phone numbers and email addresses. They are only used for these alerts, stored and deletable per hotel, and never sent to HAIP unless option A is chosen.
+- **Effort:** about 1.5–2 days for email (job, tables, script, tests); WhatsApp another 0.5–1 day once HAIP's route is agreed.
 
 ## Appendix: POS code this design changes
 

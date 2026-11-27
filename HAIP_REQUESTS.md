@@ -1,7 +1,7 @@
 # Requests for the HAIP team
 
 From the StayX POS / kitchen display team. Checked against HAIP `439956d`, 2026-11-27.
-Details, evidence and proposed API shapes are in `INTEGRATION_DESIGN.md` (§5.2 for R1–R8, §7 for Q/N) and `AUDIT.md`.
+Details, evidence and proposed API shapes are in `INTEGRATION_DESIGN.md` (§5.2 for R1–R8, §7 for Q/N, §9 for alerts) and `AUDIT.md`.
 
 **Today, without any of these:** staff confirm the guest against HAIP before ordering (read-only service principal), each charge is re-checked before it is posted by room, and anything unsafe is parked for a manager. That is safe for a pilot, but not production-ready.
 
@@ -70,6 +70,11 @@ Details, evidence and proposed API shapes are in `INTEGRATION_DESIGN.md` (§5.2 
 - **Problem:** folio-inbound emits no `folio.charge_posted`, and charges can't be looked up by `vendorTxnId`.
 - **We need:** R5 (look up a charge by vendor id) and R6 (`vendorTxnId` in the event).
 - **Unblocks:** an exact nightly reconciliation (our item 14). Matching by description works for now.
+
+**N18: manager alerts through HAIP's messaging**
+- **Problem:** to tell hotel managers by WhatsApp or SMS that charges need attention, POS would call `POST /notifications/whatsapp` or `/sms`. Those need `communications.manage`, which allows any message to anyone.
+- **We need:** a narrower permission or route (only to a hotel's staff contacts, with your consent handling), and who pays for the messages.
+- **Unblocks:** WhatsApp alerts for managers away from the POS. Email we can do ourselves (`INTEGRATION_DESIGN.md` §9).
 
 **N15: refresh token rotation**
 - **Problem:** in Keycloak 24, rotation is realm-wide only, so it affects the HAIP dashboard too.
