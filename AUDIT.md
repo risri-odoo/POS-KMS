@@ -545,3 +545,42 @@ The full Phase 1 path, run against local HAIP `439956d`:
 
   This keeps the §15 service-principal link, which is in the dump.
 - **`stayx_pos_live`:** restore its dump the same way into `pos-postgres-1`, or drop it.
+
+
+## 17. Staff login checked live (login Step G, 2026-11-27)
+
+Real Keycloak 24.0.5 (local realm `haip`), the POS API with login on, and the POS and KMS screens, signed in through Keycloak's own login page.
+
+**Set-up**
+- **Containers:** `haip-postgres`, `haip-keycloak`, `pos-postgres-1` and `pos-redis-1`, started with `docker start`. No HAIP API: the stay lookup was off (orders unverified) and there was no HAIP key, so nothing was posted to HAIP.
+- **Database:** throwaway `stayx_pos_login` (migrations plus the 12-item demo menu, loaded through the API with login off), dropped afterwards. Redis database 2, left empty. `stayx_pos` and `stayx_pos_live` untouched.
+- **Keycloak:** `scripts/keycloak/setup-pos-login.ps1 -AllowPropertyIdsAttribute` (PowerShell, `kcadm` through `docker exec`; passwords from `../secrets/keycloak-local.env`, never printed). It created:
+  - client `stayx-pos-api` with the roles `pos_staff`, `pos_kitchen` and `pos_manager`;
+  - public clients `stayx-pos-web` and `stayx-kms-web` (PKCE S256, no password grant, only the POS roles in scope, audience and `property_ids` mappers);
+  - users `pos-staff-1`, `pos-manager-1` and `kitchen-t1` (hotel A) and `kitchen-t2` (hotel B).
+
+  The clients and users are kept for local development; `teardown-pos-login.ps1` removes them.
+- **Realm-wide change:** the user profile's unmanaged attribute policy is set to `ADMIN_EDIT` (previously unset), because Keycloak 24 otherwise drops `property_ids`. The previous value is saved for the teardown. Refresh token rotation was **left off** (realm-only, §7 N15).
+
+**Result: 37 of 37 checks passed.**
+
+| Area | What was checked |
+|---|---|
+| Sign-in | Both screens send the user to Keycloak with their own client and PKCE S256, and come back signed in. Sign out ends the Keycloak session |
+| Token | `iss` is the realm; `azp` is the screen's client; `aud` is `stayx-pos-api`; `property_ids` is a real array (§7 N12); `resource_access` holds only the POS role, with no HAIP realm or client roles; 5-minute lifetime |
+| Staff | Places an unverified order; `placedBy` is `pos-staff-1` although the body said otherwise; the order shows in the POS list over the live socket. Gets 403 for status changes, the outbox and hotel B. No Menu or Outbox in the navigation |
+| Kitchen, hotel A | Board opens for hotel A from the token, socket live, the staff order appears, Accept works. Gets 403 for placing orders and reading the menu |
+| Kitchen, hotel B | Opens hotel B although the URL asked for A, and A's order isn't on its board. Asking for hotel A gets 403; A's order under its own hotel B gets 404, for reading and for a status change. Its socket can't join hotel A, but can join B |
+| Kitchen account on the POS | "This account can't take orders" |
+| Manager | Sees Menu and Outbox/Errors; outbox 200; can change status |
+| No token | API 401; socket refused with "unauthorized" |
+
+- **Database:** the order was stored with `placed_by = pos-staff-1` and `verification_status = unverified`.
+- **Logs:** every refusal was logged with the user, role and reason; the caller only got the generic message. Neither secret appears in any log.
+
+**Found on the way** (fixed in the scripts before the successful run; nothing half-applied stayed):
+- Windows PowerShell 5.1 turns `kcadm`'s progress messages on stderr into errors when `$ErrorActionPreference` is `Stop`; the scripts now judge by the exit code.
+- Text piped into `docker exec` got a byte-order mark, which Keycloak rejects; JSON now goes through a file written without one.
+- `kcadm add-roles` takes `--uusername`, not `--uname`.
+
+**For the HAIP team:** §7 N15 (rotation is realm-only), N16 (10-hour session maximum vs kitchen tablets) and N17 (`haip-api-auth` on 3001 isn't an allowed dashboard redirect); N12 and N14 updated.
