@@ -1,7 +1,14 @@
 import { pgTable, pgEnum, uuid, varchar, text, integer, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 import { orders } from './orders.js';
 
-export const outboxStatus = pgEnum('outbox_status', ['pending', 'posted', 'failed', 'needs_attention']);
+/**
+ * - pending: waiting for the worker. posted: on the guest's folio in HAIP (by the worker,
+ *   or by staff and recorded with resolution_type posted_manually).
+ * - failed / needs_attention: a person has to deal with it (Outbox/Errors screen).
+ * - resolved: closed by a person WITHOUT a folio charge (collected otherwise, written off,
+ *   duplicate or error). Never counts as posted; the worker never picks it up.
+ */
+export const outboxStatus = pgEnum('outbox_status', ['pending', 'posted', 'failed', 'needs_attention', 'resolved']);
 
 /**
  * Why a row is parked. Replaces matching HAIP's error text (Phase 1 step 3).
@@ -17,6 +24,20 @@ export const parkedReason = pgEnum('parked_reason', [
   'needs_verification',
   'wrong_property',
   'haip_rejected',
+]);
+
+/**
+ * How a manager closed a row that needed attention (required with Resolve).
+ * - posted_manually: the charge is on the folio, added in HAIP by staff (status posted).
+ * - collected_otherwise: paid another way, e.g. at the front desk (status resolved).
+ * - written_off: not charged to anyone (status resolved).
+ * - duplicate_or_error: the order shouldn't have been charged at all (status resolved).
+ */
+export const resolutionType = pgEnum('resolution_type', [
+  'posted_manually',
+  'collected_otherwise',
+  'written_off',
+  'duplicate_or_error',
 ]);
 
 export const haipPostOutbox = pgTable(
@@ -37,6 +58,15 @@ export const haipPostOutbox = pgTable(
     haipReservationId: uuid('haip_reservation_id'),
     haipFolioId: uuid('haip_folio_id'),
     parkedReason: parkedReason('parked_reason'),
+    // Set by Resolve (Outbox/Errors screen). Who comes from the staff token.
+    resolutionType: resolutionType('resolution_type'),
+    resolutionNote: text('resolution_note'),
+    resolvedBy: varchar('resolved_by', { length: 100 }),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    // The last manual Retry (the note is optional).
+    lastRetryBy: varchar('last_retry_by', { length: 100 }),
+    lastRetryAt: timestamp('last_retry_at', { withTimezone: true }),
+    lastRetryNote: text('last_retry_note'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },

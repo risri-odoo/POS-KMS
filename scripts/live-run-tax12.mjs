@@ -75,7 +75,7 @@ try {
   let row;
   for (let i = 0; i < 60; i++) {
     await sleep(1000);
-    row = (await http('GET', `${POS}/outbox?propertyId=${PROP}`)).body.find((x) => x.orderId === o.body.id);
+    row = (await http('GET', `${POS}/outbox?propertyId=${PROP}&view=all`)).body.find((x) => x.orderId === o.body.id);
     if (row && row.status !== 'pending') break;
   }
   show('T2. POS order room 210 at 12%', {

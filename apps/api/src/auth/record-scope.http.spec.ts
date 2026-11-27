@@ -176,9 +176,26 @@ describe('records from another hotel (routes with :id)', () => {
   it('a manager for A cannot retry or resolve B’s outbox row: 404, nothing queued', async () => {
     const t = await token(['pos_manager'], [A]);
     await http().post(`/outbox/${OUTBOX_B}/retry?propertyId=${A}`).set(auth(t)).expect(404);
-    await http().post(`/outbox/${OUTBOX_B}/resolve?propertyId=${A}`).set(auth(t)).send({}).expect(404);
+    await http().post(`/outbox/${OUTBOX_B}/resolve?propertyId=${A}`).set(auth(t)).send({ resolutionType: 'written_off', note: 'Comped' }).expect(404);
     await http().post(`/outbox/${OUTBOX_B}/retry?propertyId=${B}`).set(auth(t)).expect(403);
     expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('Resolve through the real pipe: type and note required; a charge id only with posted_manually', async () => {
+    const t = await token(['pos_manager'], [A]);
+    const resolve = (body: object) => http().post(`/outbox/${OUTBOX_A}/resolve?propertyId=${A}`).set(auth(t)).send(body);
+    await resolve({}).expect(400);
+    await resolve({ resolutionType: 'written_off' }).expect(400);
+    await resolve({ resolutionType: 'written_off', note: '  ' }).expect(400);
+    await resolve({ resolutionType: 'written_off', note: 'Comped', haipChargeId: 'chg-1' }).expect(400);
+    await resolve({ resolutionType: 'written_off', note: 'Comped by the manager' }).expect(200);
+    expect(queue.enqueue).not.toHaveBeenCalled();
+  });
+
+  it('Retry takes an optional note through the real pipe', async () => {
+    const t = await token(['pos_manager'], [A]);
+    await http().post(`/outbox/${OUTBOX_A}/retry?propertyId=${A}`).set(auth(t)).send({ note: 'Room fixed' }).expect(200);
+    await http().post(`/outbox/${OUTBOX_A}/retry?propertyId=${A}`).set(auth(t)).send({ unknown: 1 }).expect(400);
   });
 
   it('a manager for A cannot edit B’s menu item: 404', async () => {

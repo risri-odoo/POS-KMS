@@ -15,6 +15,13 @@
       "when": 1795340988596,
       "tag": "0001_stay_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1795788446499,
+      "tag": "0002_outbox_resolution",
+      "breakpoints": true
     }
   ]
 }

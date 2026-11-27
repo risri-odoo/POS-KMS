@@ -69,7 +69,7 @@ let key, credId, posProc, menuItemId;
 const ruleIds = [];
 
 async function outboxFor(orderId) {
-  const r = await http('GET', `${POS}/outbox?propertyId=${PROP}`);
+  const r = await http('GET', `${POS}/outbox?propertyId=${PROP}&view=all`);
   return (r.body || []).find((x) => x.orderId === orderId);
 }
 async function waitOutbox(orderId, pred, timeoutMs = 60_000) {

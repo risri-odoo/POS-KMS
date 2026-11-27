@@ -1,8 +1,10 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/roles.decorator.js';
+import { Caller } from '../auth/roles.decorator.js';
+import type { AuthPrincipal } from '../auth/token-verifier.js';
 import { OutboxService } from './outbox.service.js';
-import { ListOutboxDto, ResolveOutboxDto } from './dto/outbox.dto.js';
+import { ListOutboxDto, ResolveOutboxDto, RetryOutboxDto } from './dto/outbox.dto.js';
 
 @ApiTags('outbox')
 @Controller('outbox')
@@ -11,8 +13,11 @@ export class OutboxController {
 
   @Get()
   @Roles('pos_manager')
-  @ApiOperation({ summary: 'List HAIP folio posts for a property, newest first' })
-  @ApiResponse({ status: 200, description: 'Outbox rows' })
+  @ApiOperation({
+    summary: 'HAIP folio posts for a property, newest first, each with its order',
+    description: 'By default only rows that need a person (needs_attention, failed); view=all for every row. Filters: status, parkedReason, resolutionType.',
+  })
+  @ApiResponse({ status: 200, description: 'Outbox rows, each with its order (number, room, guest, amount)' })
   list(@Query() dto: ListOutboxDto) {
     return this.outboxService.list(dto);
   }
@@ -32,23 +37,34 @@ export class OutboxController {
   @ApiResponse({ status: 400, description: 'Row is not needs_attention or failed' })
   @ApiResponse({ status: 404, description: 'Not found in this property' })
   @ApiResponse({ status: 409, description: 'Parked for a resolve-only reason (see parkedReason)' })
-  retry(@Param('id', ParseUUIDPipe) id: string, @Query('propertyId', ParseUUIDPipe) propertyId: string) {
-    return this.outboxService.retry(id, propertyId);
+  retry(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Query('propertyId', ParseUUIDPipe) propertyId: string,
+    @Body() dto: RetryOutboxDto,
+    @Caller() caller?: AuthPrincipal,
+  ) {
+    return this.outboxService.retry(id, propertyId, dto, caller);
   }
 
   @Post(':id/resolve')
   @Roles('pos_manager')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Mark a needs_attention or failed post as posted (verified manually in HAIP)' })
+  @ApiOperation({
+    summary: 'Close a needs_attention or failed post without sending it',
+    description:
+      'resolutionType and a note are required. posted_manually (optionally with the HAIP charge id) marks it posted; ' +
+      'collected_otherwise, written_off and duplicate_or_error mark it resolved (no folio charge).',
+  })
   @ApiQuery({ name: 'propertyId', type: String, required: true })
-  @ApiResponse({ status: 200, description: 'The row, now posted' })
+  @ApiResponse({ status: 200, description: 'The row, now posted or resolved' })
   @ApiResponse({ status: 400, description: 'Row is not needs_attention or failed' })
   @ApiResponse({ status: 404, description: 'Not found in this property' })
   resolve(
     @Param('id', ParseUUIDPipe) id: string,
     @Query('propertyId', ParseUUIDPipe) propertyId: string,
     @Body() dto: ResolveOutboxDto,
+    @Caller() caller?: AuthPrincipal,
   ) {
-    return this.outboxService.resolve(id, propertyId, dto.haipChargeId);
+    return this.outboxService.resolve(id, propertyId, dto, caller);
   }
 }

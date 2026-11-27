@@ -3,12 +3,14 @@ import { BadRequestException, ConflictException, Logger, NotFoundException } fro
 import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { OutboxService, type OutboxRow } from './outbox.service.js';
+import type { AuthPrincipal } from '../auth/token-verifier.js';
 import type { HaipQueue } from '../haip/haip-queue.service.js';
 import type { Db } from '../database/database.module.js';
 import { HAIP_NO_IN_HOUSE_TEXT, NO_IN_HOUSE_GUEST_PREFIX } from '../haip/no-in-house-guard.js';
 
 const PROPERTY_ID = '11111111-1111-4111-8111-111111111111';
 const OUTBOX_ID = '55555555-5555-4555-8555-555555555555';
+const MANAGER: AuthPrincipal = { sub: 'm1', username: 'pos-manager-1', roles: ['pos_manager'], propertyIds: [PROPERTY_ID], azp: 'stayx-pos-web', expiresAt: 0 };
 const NO_GUEST_ERROR = `${NO_IN_HOUSE_GUEST_PREFIX}. HAIP rejected (400): HTTP 400: Room 110 ${HAIP_NO_IN_HOUSE_TEXT}`;
 
 function row(overrides: Partial<OutboxRow> = {}): OutboxRow {
@@ -26,6 +28,13 @@ function row(overrides: Partial<OutboxRow> = {}): OutboxRow {
     haipReservationId: null,
     haipFolioId: null,
     parkedReason: null,
+    resolutionType: null,
+    resolutionNote: null,
+    resolvedBy: null,
+    resolvedAt: null,
+    lastRetryBy: null,
+    lastRetryAt: null,
+    lastRetryNote: null,
     createdAt: new Date(),
     updatedAt: new Date(),
     ...overrides,
@@ -124,6 +133,20 @@ describe('OutboxService', () => {
       await expect(service.retry(OUTBOX_ID, PROPERTY_ID)).rejects.toBeInstanceOf(NotFoundException);
     });
 
+    it('records who retried, when, and the optional note', async () => {
+      const { service, calls } = make({ updateMatches: true, existing: row() });
+      await service.retry(OUTBOX_ID, PROPERTY_ID, { note: 'Guest fixed at desk' }, MANAGER);
+      expect(calls.set).toMatchObject({ lastRetryBy: 'pos-manager-1', lastRetryNote: 'Guest fixed at desk' });
+      expect(calls.set!['lastRetryAt']).toBeInstanceOf(Date);
+    });
+
+    it('with login off and no note: no name, no note, still recorded as retried', async () => {
+      const { service, calls } = make({ updateMatches: true, existing: row() });
+      await service.retry(OUTBOX_ID, PROPERTY_ID);
+      expect(calls.set).toMatchObject({ lastRetryBy: null, lastRetryNote: null });
+      expect(calls.set!['lastRetryAt']).toBeInstanceOf(Date);
+    });
+
     it('a Redis failure while queueing does not fail the retry (sweeper picks it up)', async () => {
       enqueue.mockRejectedValue(new Error('ECONNREFUSED'));
       const { service } = make({ updateMatches: true, existing: row() });
@@ -132,24 +155,68 @@ describe('OutboxService', () => {
   });
 
   describe('resolve', () => {
-    it('is allowed for a row parked for no in-house guest, does not send anything, and keeps the reason', async () => {
+    it('posted_manually: posted, with the charge id, type, note and who; sends nothing; keeps the reason', async () => {
       const { service, calls } = make({
         updateMatches: true,
         existing: row({ lastError: NO_GUEST_ERROR, parkedReason: 'no_in_house_guest' }),
       });
 
-      const result = await service.resolve(OUTBOX_ID, PROPERTY_ID, 'haip-charge-7');
+      const result = await service.resolve(
+        OUTBOX_ID,
+        PROPERTY_ID,
+        { resolutionType: 'posted_manually', note: 'Added to folio by front desk', haipChargeId: 'haip-charge-7' },
+        MANAGER,
+      );
 
-      expect(result).toMatchObject({ status: 'posted', haipChargeId: 'haip-charge-7', parkedReason: 'no_in_house_guest' });
+      expect(result).toMatchObject({
+        status: 'posted',
+        haipChargeId: 'haip-charge-7',
+        parkedReason: 'no_in_house_guest',
+        resolutionType: 'posted_manually',
+        resolutionNote: 'Added to folio by front desk',
+        resolvedBy: 'pos-manager-1',
+      });
       expect(calls.set!['postedAt']).toBeInstanceOf(Date);
+      expect(calls.set!['resolvedAt']).toBeInstanceOf(Date);
       expect(calls.set).not.toHaveProperty('parkedReason');
       expect(render(calls.where).sql).not.toContain('parked_reason');
       expect(enqueue).not.toHaveBeenCalled();
     });
 
+    it.each(['collected_otherwise', 'written_off', 'duplicate_or_error'] as const)(
+      '%s: resolved, never posted, no posted time',
+      async (resolutionType) => {
+        const { service, calls } = make({ updateMatches: true, existing: row({ parkedReason: 'stay_ended' }) });
+
+        const result = await service.resolve(OUTBOX_ID, PROPERTY_ID, { resolutionType, note: 'Paid at the front desk' }, MANAGER);
+
+        expect(result).toMatchObject({ status: 'resolved', resolutionType, resolutionNote: 'Paid at the front desk', resolvedBy: 'pos-manager-1' });
+        expect(calls.set).not.toHaveProperty('postedAt');
+        expect(calls.set).not.toHaveProperty('haipChargeId');
+        expect(enqueue).not.toHaveBeenCalled();
+      },
+    );
+
+    it('400 for a HAIP charge id with any type but posted_manually, before touching the row', async () => {
+      const { service, calls } = make({ updateMatches: true, existing: row() });
+      await expect(
+        service.resolve(OUTBOX_ID, PROPERTY_ID, { resolutionType: 'written_off', note: 'Comped', haipChargeId: 'c-1' }),
+      ).rejects.toThrow('only allowed with resolutionType posted_manually');
+      expect(calls.set).toBeUndefined();
+    });
+
     it('400 for a row that is not needs_attention or failed', async () => {
       const { service } = make({ updateMatches: false, existing: { status: 'pending', lastError: null } });
-      await expect(service.resolve(OUTBOX_ID, PROPERTY_ID)).rejects.toBeInstanceOf(BadRequestException);
+      await expect(service.resolve(OUTBOX_ID, PROPERTY_ID, { resolutionType: 'written_off', note: 'Comped' })).rejects.toBeInstanceOf(
+        BadRequestException,
+      );
+    });
+
+    it('404 when the row is not in this property', async () => {
+      const { service } = make({ updateMatches: false });
+      await expect(service.resolve(OUTBOX_ID, PROPERTY_ID, { resolutionType: 'written_off', note: 'Comped' })).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
     });
   });
 });

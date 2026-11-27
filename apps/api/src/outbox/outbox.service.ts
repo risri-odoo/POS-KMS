@@ -1,12 +1,33 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, inArray, type SQL } from 'drizzle-orm';
-import { haipPostOutbox } from '@stayx/database';
+import { and, desc, eq, getTableColumns, inArray, type SQL } from 'drizzle-orm';
+import { haipPostOutbox, orders } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { HaipQueue } from '../haip/haip-queue.service.js';
 import { isResolveOnly, manualRetryAllowed, resolveOnlyMessage } from '../haip/no-in-house-guard.js';
-import type { ListOutboxDto } from './dto/outbox.dto.js';
+import type { AuthPrincipal } from '../auth/token-verifier.js';
+import type { ListOutboxDto, ResolveOutboxDto, RetryOutboxDto } from './dto/outbox.dto.js';
 
 export type OutboxRow = typeof haipPostOutbox.$inferSelect;
+
+/** What the Outbox/Errors screen shows about the order behind a charge. */
+export interface OutboxOrderSummary {
+  orderNumber: string;
+  roomNumber: string;
+  subtotal: string;
+  currencyCode: string;
+  placedBy: string | null;
+  deliveredAt: Date | null;
+  verificationStatus: 'verified' | 'unverified' | null;
+  /** The guest staff confirmed (first name and initial), if any. */
+  guestName: string | null;
+}
+
+/** An outbox row with its order. Row fields stay at the top level. */
+export type OutboxEntry = OutboxRow & { order: OutboxOrderSummary | null };
+
+const DEFAULT_LIMIT = 100;
+/** Who did it, from the staff token; null when login is off. Fits the 100-character columns. */
+const actor = (caller?: AuthPrincipal) => caller?.username.slice(0, 100) ?? null;
 
 /** Only rows a human has to deal with can be retried or resolved. */
 const ACTIONABLE = ['needs_attention', 'failed'] as const;
@@ -20,14 +41,43 @@ export class OutboxService {
     private readonly haipQueue: HaipQueue,
   ) {}
 
-  list(dto: ListOutboxDto): Promise<OutboxRow[]> {
-    const conditions = [eq(haipPostOutbox.propertyId, dto.propertyId)];
+  /**
+   * Newest first, with the order. Without a status, view "attention" (the default) shows
+   * only rows a person must deal with; "all" shows everything.
+   */
+  async list(dto: ListOutboxDto): Promise<OutboxEntry[]> {
+    const conditions: SQL[] = [eq(haipPostOutbox.propertyId, dto.propertyId)];
     if (dto.status) conditions.push(eq(haipPostOutbox.status, dto.status));
-    return this.db
-      .select()
+    else if ((dto.view ?? 'attention') === 'attention') conditions.push(inArray(haipPostOutbox.status, [...ACTIONABLE]));
+    if (dto.parkedReason) conditions.push(eq(haipPostOutbox.parkedReason, dto.parkedReason));
+    if (dto.resolutionType) conditions.push(eq(haipPostOutbox.resolutionType, dto.resolutionType));
+
+    const rows = await this.db
+      .select({
+        ...getTableColumns(haipPostOutbox),
+        orderNumber: orders.orderNumber,
+        roomNumber: orders.roomNumber,
+        subtotal: orders.subtotal,
+        currencyCode: orders.currencyCode,
+        placedBy: orders.placedBy,
+        deliveredAt: orders.deliveredAt,
+        verificationStatus: orders.verificationStatus,
+        guestName: orders.verifiedGuestName,
+      })
       .from(haipPostOutbox)
+      // Same hotel on both sides, so a row can never show another hotel's order.
+      .leftJoin(orders, and(eq(orders.id, haipPostOutbox.orderId), eq(orders.propertyId, haipPostOutbox.propertyId)))
       .where(and(...conditions))
-      .orderBy(desc(haipPostOutbox.createdAt));
+      .orderBy(desc(haipPostOutbox.createdAt))
+      .limit(dto.limit ?? DEFAULT_LIMIT);
+
+    return rows.map(({ orderNumber, roomNumber, subtotal, currencyCode, placedBy, deliveredAt, verificationStatus, guestName, ...row }) => ({
+      ...row,
+      order:
+        orderNumber === null || roomNumber === null || subtotal === null || currencyCode === null
+          ? null
+          : { orderNumber, roomNumber, subtotal, currencyCode, placedBy, deliveredAt, verificationStatus, guestName },
+    }));
   }
 
   /**
@@ -35,11 +85,20 @@ export class OutboxService {
    * Allowed with no parked reason, or haip_rejected (the reason is cleared). Refused (409) for
    * resolve-only reasons: no_in_house_guest, stay_ended, needs_verification, wrong_property.
    */
-  async retry(id: string, propertyId: string): Promise<OutboxRow> {
+  async retry(id: string, propertyId: string, dto: RetryOutboxDto = {}, caller?: AuthPrincipal): Promise<OutboxRow> {
     const row = await this.transitionActionable(
       id,
       propertyId,
-      { status: 'pending', attempts: 0, lastError: null, nextRetryAt: null, parkedReason: null },
+      {
+        status: 'pending',
+        attempts: 0,
+        lastError: null,
+        nextRetryAt: null,
+        parkedReason: null,
+        lastRetryBy: actor(caller),
+        lastRetryAt: new Date(),
+        lastRetryNote: dto.note || null,
+      },
       manualRetryAllowed(),
     );
     await this.haipQueue.enqueue(row.id).catch((error: unknown) => {
@@ -49,15 +108,26 @@ export class OutboxService {
   }
 
   /**
-   * Staff checked the folio in HAIP and the charge is there: mark it posted without sending.
-   * parked_reason is kept, as a record of why it needed a person.
+   * A manager closes the row without sending anything. posted_manually: the charge is on
+   * the folio (added in HAIP by staff), so the row becomes posted. Any other type closes it
+   * as resolved: no folio charge, and it never counts as posted. parked_reason is kept, as
+   * a record of why it needed a person.
    */
-  resolve(id: string, propertyId: string, haipChargeId?: string): Promise<OutboxRow> {
+  async resolve(id: string, propertyId: string, dto: ResolveOutboxDto, caller?: AuthPrincipal): Promise<OutboxRow> {
+    const postedManually = dto.resolutionType === 'posted_manually';
+    if (dto.haipChargeId !== undefined && !postedManually) {
+      throw new BadRequestException('haipChargeId is only allowed with resolutionType posted_manually');
+    }
+    const now = new Date();
     return this.transitionActionable(id, propertyId, {
-      status: 'posted',
-      postedAt: new Date(),
+      status: postedManually ? 'posted' : 'resolved',
+      ...(postedManually ? { postedAt: now } : {}),
+      ...(dto.haipChargeId ? { haipChargeId: dto.haipChargeId } : {}),
       nextRetryAt: null,
-      ...(haipChargeId ? { haipChargeId } : {}),
+      resolutionType: dto.resolutionType,
+      resolutionNote: dto.note,
+      resolvedBy: actor(caller),
+      resolvedAt: now,
     });
   }
 
