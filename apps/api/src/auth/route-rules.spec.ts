@@ -13,6 +13,8 @@ import { ROLES_KEY } from './roles.decorator.js';
  */
 const EXPECTED: Record<string, string> = {
   'GET /': 'public',
+  'GET /health': 'public',
+  'GET /health/ready': 'public',
   'GET /menu-items': 'pos_staff, pos_manager',
   'POST /menu-items': 'pos_manager',
   'PATCH /menu-items/:id': 'pos_manager',

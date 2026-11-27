@@ -59,6 +59,17 @@ export class HaipQueue implements OnModuleDestroy {
     return this.queue;
   }
 
+  /**
+   * For /health/ready: a real round trip to Redis over the queue's own connection (BullMQ
+   * exposes no raw PING). 'not_used' when the bridge is off (no Redis needed). Rejects if
+   * Redis doesn't answer; the caller adds a timeout.
+   */
+  async ping(): Promise<'up' | 'not_used'> {
+    if (!this.active) return 'not_used';
+    await this.getQueue().getJobCounts('wait');
+    return 'up';
+  }
+
   async onModuleDestroy() {
     await this.queue?.close();
   }

@@ -5,9 +5,14 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 import { getAllowedOrigins } from './common/cors.js';
+import { productionConfigProblems } from './common/runtime-config.js';
 import { swaggerEnabled } from './swagger.js';
 
 async function bootstrap() {
+  // Production: refuse to start with development defaults (AUDIT.md item 11).
+  const problems = productionConfigProblems();
+  if (problems.length > 0) throw new Error(`Refusing to start:\n- ${problems.join('\n- ')}`);
+
   const app = await NestFactory.create(AppModule);
   app.enableShutdownHooks();
   app.enableCors({ origin: getAllowedOrigins() });

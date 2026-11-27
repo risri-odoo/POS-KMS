@@ -9,7 +9,7 @@ import {
 } from '@nestjs/websockets';
 import { isUUID } from 'class-validator';
 import type { Server, Socket } from 'socket.io';
-import { getAllowedOrigins } from '../common/cors.js';
+import { allowOrigin } from '../common/cors.js';
 import { AUTH_CONFIG, type AuthConfig } from '../auth/auth.config.js';
 import { POS_ROLES } from '../auth/roles.decorator.js';
 import { InvalidTokenError, TOKEN_VERIFIER, type AuthPrincipal, type TokenVerifier } from '../auth/token-verifier.js';
@@ -52,7 +52,7 @@ function propertyIdFrom(body: unknown): string | null {
  * reconnects with a renewed token, rejoins and refetches. With POS_AUTH_ENABLED=false
  * anyone can join any room, as before.
  */
-@WebSocketGateway({ cors: { origin: getAllowedOrigins() } })
+@WebSocketGateway({ cors: { origin: allowOrigin } })
 export class KitchenGateway implements OnGatewayInit {
   private readonly logger = new Logger(KitchenGateway.name);
 

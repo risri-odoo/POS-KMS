@@ -175,7 +175,7 @@ What POS needs but can't get today:
    - **Guest lookup (added 2026-11-22, Phase 1 step 4): closed.** `GET /api/v1/stays/lookup` is now behind staff login, for `pos_staff` and `pos_manager` only, within their hotels (§17 checked it live).
    - **The per-IP limit stays as a second line** (30 lookups per minute, `STAY_LOOKUP_RATE_LIMIT_MAX`, `..._WINDOW_MS`). Counts are in memory, per process, and keyed by the socket address, so behind a proxy all clients share one limit; keying by the signed-in user is now possible.
    - **Same exposure on the kitchen socket:** order payloads now include `verifiedGuestName` (for example "Ada L."), and the socket has no auth either (item 9).
-11. **Hardening** (S): gate Swagger outside dev, rate limiting, `/health`, no default DB credentials outside dev.
+11. **Hardening: mostly done.** Swagger off in production (login Step H, `8edfaf2`). `/health` and `/health/ready` (outbox plan Step 3): liveness, and readiness with the database and, when the HAIP bridge is on, Redis; 2 s limit per check; 503 names only the part that is down. In production the API refuses to start without `DATABASE_URL` and `CORS_ORIGINS` (plus `REDIS_URL` and `HAIP_API_URL` when a HAIP key is set), listing every missing setting at once, and refuses the development login `stayx:stayx`; migrations (`drizzle.config.ts`) follow the same rule. **Still open:** the stay-lookup rate limit is per IP and in memory; key it by the signed-in user and keep counts in Redis.
 
 **C. Correctness**
 12. **Void/refund after delivery** (L): a POS "void" state and an outbox action that asks HAIP to reverse the posted charge. Needs a HAIP endpoint POS can call (Q4).

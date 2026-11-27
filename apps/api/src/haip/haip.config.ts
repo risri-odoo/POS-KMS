@@ -1,3 +1,5 @@
+import { redisUrl } from '../common/runtime-config.js';
+
 export const HAIP_CONFIG = Symbol('HAIP_CONFIG');
 
 export interface HaipConfig {
@@ -16,10 +18,10 @@ export interface HaipConfig {
   disabledReason: string | undefined;
 }
 
+/** Development defaults. In production HAIP_API_URL and REDIS_URL must be set when a key is (runtime-config.ts). */
 const DEFAULTS = {
   apiUrl: 'http://localhost:3000/api/v1',
   timezone: 'America/New_York',
-  redisUrl: 'redis://localhost:6380',
 };
 
 export function isValidTimeZone(timeZone: string): boolean {
@@ -44,7 +46,8 @@ export function loadHaipConfig(env: NodeJS.ProcessEnv = process.env): HaipConfig
     apiKey,
     propertyId: env['HAIP_PROPERTY_ID']?.trim() || undefined,
     timezone,
-    redisUrl: env['REDIS_URL']?.trim() || DEFAULTS.redisUrl,
+    // Only used when the bridge is on; production without a key needs no Redis.
+    redisUrl: apiKey ? redisUrl(env) : env['REDIS_URL']?.trim() || 'redis://localhost:6380',
     enabled: disabledReason === undefined,
     disabledReason,
   };

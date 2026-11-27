@@ -2,20 +2,20 @@ import { Global, Inject, Module, type OnApplicationShutdown } from '@nestjs/comm
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import postgres from 'postgres';
 import * as schema from '@stayx/database';
+import { databaseUrl } from '../common/runtime-config.js';
 
 export const DRIZZLE = Symbol('DRIZZLE');
 const PG_CLIENT = Symbol('PG_CLIENT');
 
 export type Db = PostgresJsDatabase<typeof schema>;
 
-const DEFAULT_DATABASE_URL = 'postgres://stayx:stayx@localhost:5433/stayx_pos';
-
 @Global()
 @Module({
   providers: [
     {
       provide: PG_CLIENT,
-      useFactory: () => postgres(process.env['DATABASE_URL'] ?? DEFAULT_DATABASE_URL),
+      // Development default only; production must set DATABASE_URL (runtime-config.ts).
+      useFactory: () => postgres(databaseUrl()),
     },
     {
       provide: DRIZZLE,
