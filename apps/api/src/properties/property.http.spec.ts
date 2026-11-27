@@ -22,7 +22,10 @@ const ISSUER = 'http://localhost:8080/realms/haip';
 const A = 'a0000001-0000-4000-a000-000000000001';
 const UNREGISTERED = 'c0000003-0000-4000-a000-00000000000c';
 const orders = { list: vi.fn().mockResolvedValue([]) };
-const known = { find: (id: string) => Promise.resolve(id === A ? { id, active: true } : null) };
+const known = {
+  find: (id: string) =>
+    Promise.resolve(id === A ? { id, name: 'Demo hotel', currencyCode: 'USD', timezone: 'America/New_York', haipApiKeyEnv: 'HAIP_KEY_DEMO', active: true } : null),
+};
 
 async function appWith(config: AuthConfig, jwks?: ReturnType<typeof createLocalJWKSet>) {
   let builder = Test.createTestingModule({
@@ -112,5 +115,17 @@ describe('AppModule', () => {
     const imports = Reflect.getMetadata('imports', AppModule) as unknown[];
     expect(imports.indexOf(AuthModule)).toBeGreaterThanOrEqual(0);
     expect(imports.indexOf(AuthModule)).toBeLessThan(imports.indexOf(PropertiesModule));
+  });
+});
+
+describe('GET /properties/current', () => {
+  it('gives the hotel’s name, currency and timezone to any POS role, never its key variable', async () => {
+    const res = await request(off.getHttpServer()).get(`/properties/current?propertyId=${A}`).expect(200);
+    expect(Object.keys(res.body).sort()).toEqual(['currencyCode', 'id', 'name', 'timezone']);
+    expect(JSON.stringify(res.body)).not.toContain('HAIP_KEY');
+  });
+
+  it('is behind login like every other route', async () => {
+    await request(on.getHttpServer()).get(`/properties/current?propertyId=${A}`).expect(401);
   });
 });

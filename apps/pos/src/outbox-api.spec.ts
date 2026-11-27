@@ -46,3 +46,12 @@ describe('outbox API calls', () => {
     expect(body).toEqual({ resolutionType: 'posted_manually', note: 'On the folio', haipChargeId: 'chg-1' });
   });
 });
+
+describe('getCurrentProperty', () => {
+  it('asks for the hotel by propertyId', async () => {
+    const { getCurrentProperty } = await import('./api.js');
+    const fetchMock = respond({ id: A, name: 'Demo hotel', currencyCode: 'USD', timezone: 'America/New_York' });
+    await expect(getCurrentProperty(A)).resolves.toMatchObject({ currencyCode: 'USD' });
+    expect(call(fetchMock).url.pathname + call(fetchMock).url.search).toBe(`/api/v1/properties/current?propertyId=${A}`);
+  });
+});

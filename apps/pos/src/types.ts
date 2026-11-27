@@ -98,11 +98,19 @@ export type StayLookupResponse =
   | { status: 'unavailable' }
   | { status: 'not_configured' };
 
+/** GET /properties/current: what the screen needs about its hotel. */
+export interface PublicProperty {
+  id: string;
+  name: string;
+  currencyCode: string;
+  timezone: string;
+}
+
+/** POST /menu-items. No currency: the server uses the hotel's (AUDIT.md item 5). */
 export interface CreateMenuItemBody {
   propertyId: string;
   name: string;
   price: string;
-  currencyCode: string;
   category?: string;
   description?: string;
   sortOrder?: number;
@@ -142,6 +150,8 @@ export interface OutboxEntry {
   lastRetryNote: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Whether the server would accept Retry now (e.g. "Hotel not set up" once its key is set). */
+  retryAllowed: boolean;
   order: {
     orderNumber: string;
     roomNumber: string;

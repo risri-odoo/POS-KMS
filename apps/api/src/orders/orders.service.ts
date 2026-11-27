@@ -19,6 +19,7 @@ import { resolveStayBinding, type StayBinding } from './stay-binding.js';
 import { generateOrderNumber, priceOrder } from './order-pricing.js';
 import type { CreateOrderDto, ListOrdersDto } from './dto/order.dto.js';
 import type { AuthPrincipal } from '../auth/token-verifier.js';
+import { PROPERTY_DIRECTORY, type PropertyDirectory, type PropertyRecord } from '../properties/properties.service.js';
 
 export type Order = typeof orders.$inferSelect;
 export type OrderItem = typeof orderItems.$inferSelect;
@@ -47,6 +48,7 @@ export class OrdersService {
     private readonly orderEvents: OrderEventsService,
     private readonly haipQueue: HaipQueue,
     @Inject(STAY_LOOKUP) private readonly stayLookup: StayLookup,
+    @Inject(PROPERTY_DIRECTORY) private readonly directory: PropertyDirectory,
   ) {}
 
   /**
@@ -57,13 +59,15 @@ export class OrdersService {
     const placedBy = caller ? caller.username.slice(0, PLACED_BY_MAX) : dto.placedBy;
     // Which stay the order is for, checked with HAIP before anything is written.
     const binding = await resolveStayBinding(this.stayLookup, dto);
+    const property = await this.directory.find(dto.propertyId);
+    if (!property) throw new NotFoundException('Unknown property');
 
     // A random 4-char suffix can collide within a day; the unique index catches
     // it and we retry the whole transaction with a fresh number.
     let order: OrderWithItems;
     for (let attempt = 1; ; attempt++) {
       try {
-        order = await this.insertOrder(dto, placedBy, binding, generateOrderNumber());
+        order = await this.insertOrder(dto, placedBy, binding, generateOrderNumber(), property);
         break;
       } catch (error) {
         if (attempt < MAX_ORDER_NUMBER_ATTEMPTS && isUniqueViolation(error, ORDER_NUMBER_UNIQUE)) continue;
@@ -75,12 +79,24 @@ export class OrdersService {
     return order;
   }
 
-  private insertOrder(dto: CreateOrderDto, placedBy: string | undefined, binding: StayBinding, orderNumber: string): Promise<OrderWithItems> {
+  private insertOrder(
+    dto: CreateOrderDto,
+    placedBy: string | undefined,
+    binding: StayBinding,
+    orderNumber: string,
+    property: Pick<PropertyRecord, 'name' | 'currencyCode'>,
+  ): Promise<OrderWithItems> {
     return this.db.transaction(async (tx) => {
       const ids = [...new Set(dto.items.map((i) => i.menuItemId))];
       const menu = await this.menuService.findByIds(ids, dto.propertyId, tx as unknown as Db);
       // Prices come from the menu rows only — never from the client.
       const priced = priceOrder(new Map(menu.map((m) => [m.id, m])), dto.items);
+      // An item priced in another currency (e.g. from before Step 5) never reaches a folio.
+      if (priced.currencyCode !== property.currencyCode) {
+        throw new BadRequestException(
+          `These menu items are priced in ${priced.currencyCode}, but ${property.name} uses ${property.currencyCode}. Ask a manager to fix the menu.`,
+        );
+      }
 
       const [order] = await tx
         .insert(orders)

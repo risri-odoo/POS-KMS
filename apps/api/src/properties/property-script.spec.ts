@@ -27,6 +27,17 @@ describe('scripts/property.mjs (dry run)', () => {
     expect(run('update', '--id', A, '--name', 'X', '--if-missing', '--dry-run').err).toContain('--if-missing only goes with add');
   });
 
+  it('check-menu-currency: a read-only query for items not in their hotel’s currency or hotel', () => {
+    const r = run('check-menu-currency', '--dry-run');
+    expect(r.code).toBe(0);
+    const { text, values } = JSON.parse(r.out) as { text: string; values: unknown[] };
+    expect(text).toMatch(/^select /);
+    expect(text).toContain('left join properties p on p.id = m.property_id');
+    expect(text).toContain('p.id is null or m.currency_code <> p.currency_code');
+    expect(values).toEqual([]);
+    expect(run('check-menu-currency', '--id', A, '--dry-run').err).toContain('takes no options');
+  });
+
   it('update: only the given fields; "none" removes the key variable', () => {
     const r = run('update', '--id', A, '--key-env', 'none', '--active', 'false', '--dry-run');
     expect(JSON.parse(r.out)).toEqual({

@@ -30,7 +30,13 @@ export const RESOLVE_ONLY_REASONS: readonly ParkedReason[] = [
   'wrong_property',
 ];
 
-export function isResolveOnly(reason: ParkedReason | null | undefined): boolean {
+/**
+ * @param hotelKeyReady the row's hotel now has a usable HAIP key. Only then may a charge
+ *   parked as wrong_property ("Hotel not set up") be retried, by a person (never by the
+ *   sweeper); the stay is still re-checked before posting.
+ */
+export function isResolveOnly(reason: ParkedReason | null | undefined, hotelKeyReady = false): boolean {
+  if (reason === 'wrong_property' && hotelKeyReady) return false;
   return reason != null && RESOLVE_ONLY_REASONS.includes(reason);
 }
 
@@ -44,13 +50,24 @@ export function autoPostAllowed(): SQL {
   return isNull(haipPostOutbox.parkedReason);
 }
 
-/** Staff may press Retry on rows with no reason, or rejected for bad data (haip_rejected). */
-export function manualRetryAllowed(): SQL {
-  return or(isNull(haipPostOutbox.parkedReason), eq(haipPostOutbox.parkedReason, 'haip_rejected'))!;
+/**
+ * Staff may press Retry on rows with no reason, rejected for bad data (haip_rejected), and,
+ * once the hotel has a usable HAIP key, "Hotel not set up" (wrong_property).
+ */
+export function manualRetryAllowed(hotelKeyReady = false): SQL {
+  return or(
+    isNull(haipPostOutbox.parkedReason),
+    eq(haipPostOutbox.parkedReason, 'haip_rejected'),
+    ...(hotelKeyReady ? [eq(haipPostOutbox.parkedReason, 'wrong_property')] : []),
+  )!;
 }
+
+/** The 409 message for Retry on a "Hotel not set up" charge while the key is still missing. */
+export const ADD_HOTEL_KEY_FIRST = "Add the hotel's HAIP key first, then Retry (or post it in HAIP and resolve it here).";
 
 /** The 409 message for Retry on a resolve-only row. */
 export function resolveOnlyMessage(reason: ParkedReason): string {
+  if (reason === 'wrong_property') return `This hotel is not set up for HAIP posting (no active hotel or no usable HAIP key). ${ADD_HOTEL_KEY_FIRST}`;
   const why: Record<ParkedReason, string> = {
     no_in_house_guest: 'the room had no in-house guest',
     stay_ended: "the guest's stay had ended before it could be posted",

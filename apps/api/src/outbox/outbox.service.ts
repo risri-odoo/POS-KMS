@@ -4,6 +4,7 @@ import { haipPostOutbox, orders } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { HaipQueue } from '../haip/haip-queue.service.js';
 import { isResolveOnly, manualRetryAllowed, resolveOnlyMessage } from '../haip/no-in-house-guard.js';
+import { PROPERTY_DIRECTORY, haipApiKeyFor, type PropertyDirectory } from '../properties/properties.service.js';
 import type { AuthPrincipal } from '../auth/token-verifier.js';
 import type { ListOutboxDto, ResolveOutboxDto, RetryOutboxDto } from './dto/outbox.dto.js';
 
@@ -23,7 +24,11 @@ export interface OutboxOrderSummary {
 }
 
 /** An outbox row with its order. Row fields stay at the top level. */
-export type OutboxEntry = OutboxRow & { order: OutboxOrderSummary | null };
+/**
+ * An outbox row with its order. Row fields stay at the top level. retryAllowed: whether
+ * Retry would be accepted now (the screen follows it instead of repeating the rules).
+ */
+export type OutboxEntry = OutboxRow & { order: OutboxOrderSummary | null; retryAllowed: boolean };
 
 const DEFAULT_LIMIT = 100;
 /** Who did it, from the staff token; null when login is off. Fits the 100-character columns. */
@@ -39,7 +44,14 @@ export class OutboxService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly haipQueue: HaipQueue,
+    @Inject(PROPERTY_DIRECTORY) private readonly directory: PropertyDirectory,
   ) {}
+
+  /** The hotel is active and its HAIP_KEY_* variable is set now. */
+  private async hotelKeyReady(propertyId: string): Promise<boolean> {
+    const property = await this.directory.find(propertyId);
+    return property !== null && haipApiKeyFor(property).ok;
+  }
 
   /**
    * Newest first, with the order. Without a status, view "attention" (the default) shows
@@ -71,8 +83,10 @@ export class OutboxService {
       .orderBy(desc(haipPostOutbox.createdAt))
       .limit(dto.limit ?? DEFAULT_LIMIT);
 
+    const keyReady = await this.hotelKeyReady(dto.propertyId);
     return rows.map(({ orderNumber, roomNumber, subtotal, currencyCode, placedBy, deliveredAt, verificationStatus, guestName, ...row }) => ({
       ...row,
+      retryAllowed: ACTIONABLE.some((s) => s === row.status) && !isResolveOnly(row.parkedReason, keyReady),
       order:
         orderNumber === null || roomNumber === null || subtotal === null || currencyCode === null
           ? null
@@ -86,6 +100,7 @@ export class OutboxService {
    * resolve-only reasons: no_in_house_guest, stay_ended, needs_verification, wrong_property.
    */
   async retry(id: string, propertyId: string, dto: RetryOutboxDto = {}, caller?: AuthPrincipal): Promise<OutboxRow> {
+    const keyReady = await this.hotelKeyReady(propertyId);
     const row = await this.transitionActionable(
       id,
       propertyId,
@@ -99,7 +114,8 @@ export class OutboxService {
         lastRetryAt: new Date(),
         lastRetryNote: dto.note || null,
       },
-      manualRetryAllowed(),
+      manualRetryAllowed(keyReady),
+      keyReady,
     );
     await this.haipQueue.enqueue(row.id).catch((error: unknown) => {
       this.logger.warn(`Could not queue retry for ${row.id} (sweeper will pick it up): ${(error as Error)?.message ?? error}`);
@@ -137,6 +153,7 @@ export class OutboxService {
     propertyId: string,
     changes: Partial<OutboxRow>,
     guard?: SQL,
+    hotelKeyReady = false,
   ): Promise<OutboxRow> {
     const [row] = await this.db
       .update(haipPostOutbox)
@@ -157,7 +174,7 @@ export class OutboxService {
       .from(haipPostOutbox)
       .where(and(eq(haipPostOutbox.id, id), eq(haipPostOutbox.propertyId, propertyId)));
     if (!existing) throw new NotFoundException(`Outbox entry ${id} not found`);
-    if (guard && ACTIONABLE.some((s) => s === existing.status) && existing.parkedReason && isResolveOnly(existing.parkedReason)) {
+    if (guard && ACTIONABLE.some((s) => s === existing.status) && existing.parkedReason && isResolveOnly(existing.parkedReason, hotelKeyReady)) {
       throw new ConflictException(resolveOnlyMessage(existing.parkedReason));
     }
     throw new BadRequestException(

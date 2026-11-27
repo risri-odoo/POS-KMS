@@ -19,6 +19,7 @@ const EXPECTED: Record<string, string> = {
   'POST /menu-items': 'pos_manager',
   'PATCH /menu-items/:id': 'pos_manager',
   'GET /stays/lookup': 'pos_staff, pos_manager',
+  'GET /properties/current': 'pos_staff, pos_kitchen, pos_manager',
   'POST /orders': 'pos_staff, pos_manager',
   'GET /orders': 'pos_staff, pos_kitchen, pos_manager',
   'GET /orders/:id': 'pos_staff, pos_kitchen, pos_manager',

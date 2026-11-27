@@ -8,6 +8,7 @@ import type {
   OutboxEntry,
   OutboxQuery,
   PlaceOrderBody,
+  PublicProperty,
   ResolveOutboxBody,
   StayLookupResponse,
   UpdateMenuItemBody,
@@ -89,6 +90,11 @@ export function placeOrder(body: PlaceOrderBody): Promise<OrderWithItems> {
 /** In-house stays for a room, for staff to confirm the guest before ordering. */
 export function lookupStays(propertyId: string, roomNumber: string): Promise<StayLookupResponse> {
   return request(`/stays/lookup?propertyId=${q(propertyId)}&roomNumber=${q(roomNumber)}`);
+}
+
+/** The hotel's name, currency and timezone. */
+export function getCurrentProperty(propertyId: string): Promise<PublicProperty> {
+  return request(`/properties/current?propertyId=${q(propertyId)}`);
 }
 
 /** HAIP folio posts with their orders. By default only those that need a manager. */

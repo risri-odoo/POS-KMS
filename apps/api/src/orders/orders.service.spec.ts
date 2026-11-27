@@ -9,10 +9,15 @@ import type { MenuService } from '../menu/menu.service.js';
 import type { OrderEventsService } from '../events/order-events.service.js';
 import type { HaipQueue } from '../haip/haip-queue.service.js';
 import type { CreateOrderDto } from './dto/order.dto.js';
+import type { PropertyDirectory } from '../properties/properties.service.js';
 
 const PROPERTY_ID = '11111111-1111-4111-8111-111111111111';
 const ORDER_ID = '33333333-3333-4333-8333-333333333333';
 const OUTBOX_ID = '55555555-5555-4555-8555-555555555555';
+/** The hotel the orders are for: prices in USD. */
+const usdHotel: PropertyDirectory = {
+  find: (id: string) => Promise.resolve(id === PROPERTY_ID ? ({ id, name: 'Demo hotel', currencyCode: 'USD', timezone: 'America/New_York' } as never) : null),
+};
 
 // A plain object (not a CreateOrderDto instance), so tests can spread it.
 const dto = {
@@ -85,6 +90,7 @@ describe('OrdersService', () => {
       events as unknown as OrderEventsService,
       queue as unknown as HaipQueue,
       new NotConfiguredStayLookup(),
+      usdHotel,
     );
   });
 
@@ -126,7 +132,7 @@ describe('OrdersService', () => {
         },
       ]);
       const { capture, inserted } = capturingDb();
-      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, lookup);
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, lookup, usdHotel);
 
       await svc.create({ ...dto, unverified: undefined, reservationId: '66666666-6666-4666-8666-666666666666', confirmedGuestName: 'Ada L.' });
 
@@ -142,7 +148,7 @@ describe('OrdersService', () => {
 
     it('writes an unverified order with no stay ids', async () => {
       const { capture, inserted } = capturingDb();
-      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup());
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup(), usdHotel);
 
       await svc.create(dto);
 
@@ -151,7 +157,7 @@ describe('OrdersService', () => {
 
     it('takes placedBy from the signed-in caller and ignores the body’s (auth on)', async () => {
       const { capture, inserted } = capturingDb();
-      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup());
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup(), usdHotel);
       const caller = { sub: 'u1', username: 'pos-staff-1', roles: ['pos_staff'], propertyIds: [PROPERTY_ID], azp: 'stayx-pos-web', expiresAt: 0 };
 
       await svc.create({ ...dto, placedBy: 'someone-else' }, caller);
@@ -163,11 +169,28 @@ describe('OrdersService', () => {
 
     it('keeps the body’s placedBy when auth is off (no caller)', async () => {
       const { capture, inserted } = capturingDb();
-      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup());
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup(), usdHotel);
 
       await svc.create({ ...dto, placedBy: 'pos' });
 
       expect(inserted[0]!['placedBy']).toBe('pos');
+    });
+
+    it('refuses an order priced in another currency than the hotel’s, writing nothing (AUDIT item 5)', async () => {
+      const { capture, inserted } = capturingDb();
+      const eurMenu = { findByIds: vi.fn().mockResolvedValue([{ ...(await menu.findByIds())[0], currencyCode: 'EUR' }]) };
+      const svc = new OrdersService(capture as unknown as Db, eurMenu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup(), usdHotel);
+
+      await expect(svc.create(dto)).rejects.toThrow('priced in EUR, but Demo hotel uses USD');
+      expect(inserted).toHaveLength(0);
+      expect(events.emitOrderCreated).not.toHaveBeenCalled();
+    });
+
+    it('404 for an unknown hotel (the guard normally answers first)', async () => {
+      const { capture } = capturingDb();
+      const svc = new OrdersService(capture as unknown as Db, menu as unknown as MenuService, events as unknown as OrderEventsService, queue as unknown as HaipQueue, new NotConfiguredStayLookup(), { find: () => Promise.resolve(null) });
+      await expect(svc.create(dto)).rejects.toThrow('Unknown property');
+      expect(capture.transaction).not.toHaveBeenCalled();
     });
 
     it('a rejected binding writes nothing and emits nothing', async () => {

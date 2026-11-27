@@ -38,27 +38,38 @@ describe('wording', () => {
 });
 
 describe('which actions are offered', () => {
-  it('Retry and Resolve only for charges that need attention or failed', () => {
-    for (const s of ['pending', 'posted', 'resolved'] as const) {
-      expect(canRetry(row(s))).toBe(false);
-      expect(canResolve(row(s))).toBe(false);
-    }
-    expect(canRetry(row('failed'))).toBe(true);
+  it('Resolve only for charges that need attention or failed', () => {
+    for (const s of ['pending', 'posted', 'resolved'] as const) expect(canResolve(row(s))).toBe(false);
     expect(canResolve(row('needs_attention'))).toBe(true);
+    expect(canResolve(row('failed'))).toBe(true);
   });
 
-  it.each(['no_in_house_guest', 'stay_ended', 'needs_verification', 'wrong_property'] as const)(
-    'a charge parked as %s can only be resolved, with the reason shown',
-    (reason) => {
-      expect(canRetry(row('needs_attention', reason))).toBe(false);
-      expect(canResolve(row('needs_attention', reason))).toBe(true);
-      expect(retryBlockedReason(row('needs_attention', reason))).toMatch(/could charge the wrong guest/);
-    },
-  );
+  it('Retry follows the server’s retryAllowed, and never for closed charges', () => {
+    expect(canRetry({ ...row('failed'), retryAllowed: true })).toBe(true);
+    expect(canRetry({ ...row('needs_attention', 'haip_rejected'), retryAllowed: false })).toBe(false);
+    expect(canRetry({ ...row('posted'), retryAllowed: true })).toBe(false);
+  });
+
+  it.each(['no_in_house_guest', 'stay_ended', 'needs_verification'] as const)('a charge parked as %s can only be resolved, with the reason shown', (reason) => {
+    const entry = { ...row('needs_attention', reason), retryAllowed: false };
+    expect(canRetry(entry)).toBe(false);
+    expect(canResolve(entry)).toBe(true);
+    expect(retryBlockedReason(entry)).toMatch(/could charge the wrong guest/);
+  });
+
+  it('"Hotel not set up": Retry once the hotel’s key is set, otherwise "Add the hotel’s HAIP key first."', () => {
+    const without = { ...row('needs_attention', 'wrong_property'), retryAllowed: false };
+    expect(canRetry(without)).toBe(false);
+    expect(retryBlockedReason(without)).toBe("Add the hotel's HAIP key first.");
+    const withKey = { ...row('needs_attention', 'wrong_property'), retryAllowed: true };
+    expect(canRetry(withKey)).toBe(true);
+    expect(retryBlockedReason(withKey)).toBeNull();
+  });
 
   it('a charge HAIP rejected can be retried once fixed', () => {
-    expect(canRetry(row('needs_attention', 'haip_rejected'))).toBe(true);
-    expect(retryBlockedReason(row('needs_attention', 'haip_rejected'))).toBeNull();
+    const entry = { ...row('needs_attention', 'haip_rejected'), retryAllowed: true };
+    expect(canRetry(entry)).toBe(true);
+    expect(retryBlockedReason(entry)).toBeNull();
   });
 
   it('warns to check the folio first only for failed charges', () => {

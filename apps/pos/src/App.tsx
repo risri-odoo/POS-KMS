@@ -2,7 +2,7 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 import { AlertTriangle, ClipboardList, LogOut, UtensilsCrossed } from 'lucide-react';
 import { AppShell, Button, HeaderDate, type NavSection } from '@stayx/ui';
 import { version } from '../package.json';
-import { ApiError, listMenu, lookupStays, messageOf, placeOrder } from './api.js';
+import { ApiError, getCurrentProperty, listMenu, lookupStays, messageOf, placeOrder } from './api.js';
 import { initialStayConfirm, orderBinding, stayConfirmReducer } from './stay-confirm.js';
 import { cartReducer, cartSubtotal, emptyCart, unavailableLines } from './cart.js';
 import { resolvePropertyId } from './config.js';
@@ -13,7 +13,7 @@ import { OutboxPanel } from './components/OutboxPanel.js';
 import { NewOrder } from './components/NewOrder.js';
 import { Notice, type NoticeMessage } from './components/Notice.js';
 import { PropertyForm } from './components/PropertyForm.js';
-import type { MenuItem } from './types.js';
+import type { MenuItem, PublicProperty } from './types.js';
 import { useOrdersFeed } from './useOrdersFeed.js';
 import { AuthGate, type SignedIn } from './auth/AuthGate.js';
 import { setBeforeSignIn } from './auth/before-sign-in.js';
@@ -110,6 +110,7 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
     kept ? { kind: 'success', text: 'Your order in progress was kept after signing in again. Confirm the guest again before placing it.' } : null,
   );
   const [menu, setMenu] = useState<MenuItem[] | null>(null);
+  const [property, setProperty] = useState<PublicProperty | null>(null);
   const [cart, dispatchCart] = useReducer(cartReducer, kept?.cart ?? emptyCart);
   const [roomNumber, setRoomNumber] = useState(kept?.roomNumber ?? '');
   const [stay, dispatchStay] = useReducer(stayConfirmReducer, initialStayConfirm);
@@ -141,6 +142,18 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, [isManager]);
+
+  // The hotel's name and currency (shown on the menu screen).
+  useEffect(() => {
+    let alive = true;
+    getCurrentProperty(propertyId).then(
+      (p) => alive && setProperty(p),
+      (error: unknown) => alive && notify('error', `Could not load the hotel: ${messageOf(error)}`),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [propertyId, notify]);
 
   // The latest menu, so successive updates (e.g. optimistic toggle, then the
   // server's row) compose instead of each starting from a stale render.
@@ -309,7 +322,7 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
           recent={orders}
         />
       ) : tab === 'menu' ? (
-        <MenuManager propertyId={propertyId} menu={menu} onMenuChange={onMenuChange} notify={notify} />
+        <MenuManager propertyId={propertyId} currencyCode={property?.currencyCode ?? null} menu={menu} onMenuChange={onMenuChange} notify={notify} />
       ) : (
         <OutboxPanel propertyId={propertyId} notify={notify} />
       )}

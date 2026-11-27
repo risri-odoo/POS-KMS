@@ -27,7 +27,7 @@ export const REASON_TEXT: Record<ParkedReason, string> = {
   no_in_house_guest: 'HAIP had no guest checked in to that room.',
   stay_ended: "The guest's stay ended before the charge could be posted.",
   needs_verification: 'Placed as unverified, and no single checked-in guest could be matched to the room.',
-  wrong_property: "This hotel isn't set up for HAIP posting (no HAIP key). Post it in HAIP and resolve it, or ask an admin to set the hotel up.",
+  wrong_property: "This hotel isn't set up for HAIP posting (no HAIP key). Once an admin adds the key, Retry it; or post it in HAIP and resolve it.",
   haip_rejected: 'HAIP rejected the charge. Fix the cause (see the error), then Retry.',
 };
 
@@ -55,8 +55,8 @@ export const RESOLUTION_HINT: Record<ResolutionType, string> = {
 
 export const RESOLUTION_TYPES = Object.keys(RESOLUTION_LABEL) as ResolutionType[];
 
-/** These can only be resolved; sending them again could charge the wrong guest (the API answers 409). */
-const RESOLVE_ONLY: readonly ParkedReason[] = ['no_in_house_guest', 'stay_ended', 'needs_verification', 'wrong_property'];
+/** Never retryable: sending again could charge the wrong guest (the API answers 409). */
+const RESOLVE_ONLY: readonly ParkedReason[] = ['no_in_house_guest', 'stay_ended', 'needs_verification'];
 
 const isActionable = (entry: Pick<OutboxEntry, 'status'>) => entry.status === 'needs_attention' || entry.status === 'failed';
 
@@ -64,13 +64,18 @@ export function canResolve(entry: Pick<OutboxEntry, 'status'>): boolean {
   return isActionable(entry);
 }
 
-export function canRetry(entry: Pick<OutboxEntry, 'status' | 'parkedReason'>): boolean {
-  return isActionable(entry) && !(entry.parkedReason && RESOLVE_ONLY.includes(entry.parkedReason));
+/** The server decides (retryAllowed): e.g. "Hotel not set up" becomes retryable once the hotel's key is set. */
+export function canRetry(entry: Pick<OutboxEntry, 'status' | 'retryAllowed'>): boolean {
+  return isActionable(entry) && entry.retryAllowed;
 }
 
+export const ADD_HOTEL_KEY_FIRST = "Add the hotel's HAIP key first.";
+
 /** Why Retry is off for this row, or null when it is allowed. */
-export function retryBlockedReason(entry: Pick<OutboxEntry, 'status' | 'parkedReason'>): string | null {
+export function retryBlockedReason(entry: Pick<OutboxEntry, 'status' | 'parkedReason' | 'retryAllowed'>): string | null {
   if (!isActionable(entry)) return 'Only charges that need attention or failed can be sent again.';
+  if (entry.retryAllowed) return null;
+  if (entry.parkedReason === 'wrong_property') return ADD_HOTEL_KEY_FIRST;
   if (entry.parkedReason && RESOLVE_ONLY.includes(entry.parkedReason)) {
     return 'Sending it again could charge the wrong guest. Check the folio in HAIP, then Resolve.';
   }

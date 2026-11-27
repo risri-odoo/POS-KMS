@@ -41,9 +41,10 @@ export class CreateMenuItemDto {
   price!: string;
 
   @ApiProperty({ example: 'USD' })
+  @IsOptional()
   @IsString()
   @Length(3, 3)
-  currencyCode!: string;
+  currencyCode?: string;
 
   @ApiPropertyOptional({ default: true })
   @IsOptional()

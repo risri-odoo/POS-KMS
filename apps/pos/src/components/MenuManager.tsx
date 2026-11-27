@@ -28,6 +28,8 @@ import type { MenuItem, UpdateMenuItemBody } from '../types.js';
 
 interface Props {
   propertyId: string;
+  /** The hotel's currency (GET /properties/current); null while loading. */
+  currencyCode: string | null;
   menu: MenuItem[] | null;
   /** Apply a change to the shared menu (also keeps the cart in sync). */
   onMenuChange: (update: (menu: MenuItem[]) => MenuItem[]) => void;
@@ -36,7 +38,7 @@ interface Props {
 
 const replace = (item: MenuItem) => (menu: MenuItem[]) => menu.map((m) => (m.id === item.id ? item : m));
 
-export function MenuManager({ propertyId, menu, onMenuChange, notify }: Props) {
+export function MenuManager({ propertyId, currencyCode, menu, onMenuChange, notify }: Props) {
   // Optimistic availability toggle: flip locally, PATCH, roll back on failure.
   const toggleAvailable = async (item: MenuItem) => {
     const next = !item.isAvailable;
@@ -53,7 +55,7 @@ export function MenuManager({ propertyId, menu, onMenuChange, notify }: Props) {
     <>
       <PageHeader title="Menu" icon={UtensilsCrossed} className="mb-4!" />
       <div className="flex flex-col gap-4">
-        <AddItemForm propertyId={propertyId} onCreated={(item) => onMenuChange((m) => [...m, item])} notify={notify} />
+        <AddItemForm propertyId={propertyId} currencyCode={currencyCode} onCreated={(item) => onMenuChange((m) => [...m, item])} notify={notify} />
 
         <section aria-label="Menu items">
           <h2 className="mb-2 text-sm font-semibold text-telivity-navy">Menu items</h2>
@@ -206,14 +208,16 @@ function MenuRow({
   );
 }
 
-const EMPTY_FORM: MenuItemForm = { name: '', category: '', description: '', price: '', currencyCode: 'USD', sortOrder: '' };
+const EMPTY_FORM: MenuItemForm = { name: '', category: '', description: '', price: '', sortOrder: '' };
 
 function AddItemForm({
   propertyId,
+  currencyCode,
   onCreated,
   notify,
 }: {
   propertyId: string;
+  currencyCode: string | null;
   onCreated: (item: MenuItem) => void;
   notify: Props['notify'];
 }) {
@@ -237,13 +241,12 @@ function AddItemForm({
         propertyId,
         name: form.name.trim(),
         price: normalizePrice(form.price),
-        currencyCode: form.currencyCode.trim().toUpperCase(),
         ...(form.category.trim() ? { category: form.category.trim() } : {}),
         ...(form.description.trim() ? { description: form.description.trim() } : {}),
         ...(form.sortOrder.trim() ? { sortOrder: Number(form.sortOrder.trim()) } : {}),
       });
       onCreated(created);
-      setForm({ ...EMPTY_FORM, currencyCode: form.currencyCode, category: form.category });
+      setForm({ ...EMPTY_FORM, category: form.category });
       notify('success', `Added "${created.name}".`);
     } catch (error) {
       setServerError(messageOf(error));
@@ -259,11 +262,20 @@ function AddItemForm({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           <TextField label="Name *" error={errors.name} value={form.name} onChange={set('name')} maxLength={255} />
           <TextField label="Category" error={errors.category} value={form.category} onChange={set('category')} maxLength={100} />
-          <TextField label="Price *" error={errors.price} value={form.price} onChange={set('price')} inputMode="decimal" placeholder="12.50" />
-          <TextField label="Currency" error={errors.currencyCode} value={form.currencyCode} onChange={set('currencyCode')} maxLength={3} />
+          <TextField
+            label={currencyCode ? `Price (${currencyCode}) *` : 'Price *'}
+            error={errors.price}
+            value={form.price}
+            onChange={set('price')}
+            inputMode="decimal"
+            placeholder="12.50"
+          />
           <TextField label="Sort order" error={errors.sortOrder} value={form.sortOrder} onChange={set('sortOrder')} inputMode="numeric" placeholder="0" />
           <TextField label="Description" error={errors.description} value={form.description} onChange={set('description')} />
         </div>
+        <p className="text-xs text-telivity-slate">
+          {currencyCode ? `Prices are in ${currencyCode}, this hotel's currency.` : 'Prices use this hotel’s currency.'}
+        </p>
         {serverError && <p className="text-sm text-red-600">{serverError}</p>}
         <Button type="submit" disabled={saving} className="min-h-11 self-start">
           {saving ? 'Adding…' : 'Add item'}

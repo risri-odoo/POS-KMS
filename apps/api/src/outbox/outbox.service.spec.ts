@@ -4,6 +4,7 @@ import type { SQL } from 'drizzle-orm';
 import { PgDialect } from 'drizzle-orm/pg-core';
 import { OutboxService, type OutboxRow } from './outbox.service.js';
 import type { AuthPrincipal } from '../auth/token-verifier.js';
+import type { PropertyDirectory } from '../properties/properties.service.js';
 import type { HaipQueue } from '../haip/haip-queue.service.js';
 import type { Db } from '../database/database.module.js';
 import { HAIP_NO_IN_HOUSE_TEXT, NO_IN_HOUSE_GUEST_PREFIX } from '../haip/no-in-house-guard.js';
@@ -69,12 +70,17 @@ const render = (where: SQL | undefined) => new PgDialect().sqlToQuery(where!);
 
 describe('OutboxService', () => {
   let enqueue: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
+  /** The rows' hotel; its key variable is HAIP_KEY_OUTBOXTEST, set or not per test. */
+  const hotel: PropertyDirectory = {
+    find: () => Promise.resolve({ id: PROPERTY_ID, name: 'Demo hotel', haipApiKeyEnv: 'HAIP_KEY_OUTBOXTEST', active: true } as never),
+  };
   const make = (opts: Parameters<typeof fakeDb>[0]) => {
     const { db, calls } = fakeDb(opts);
-    return { service: new OutboxService(db, { enqueue } as unknown as HaipQueue), calls };
+    return { service: new OutboxService(db, { enqueue } as unknown as HaipQueue, hotel), calls };
   };
 
   beforeEach(() => {
+    delete process.env['HAIP_KEY_OUTBOXTEST'];
     enqueue = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
   });
@@ -110,8 +116,25 @@ describe('OutboxService', () => {
       expect(sql).not.toContain('last_error');
     });
 
-    it.each(['no_in_house_guest', 'stay_ended', 'needs_verification', 'wrong_property'] as const)(
-      'refuses a row parked as %s with 409 and does not queue',
+    it('"Hotel not set up": 409 "Add the hotel’s HAIP key first" while the key is missing', async () => {
+      const { service, calls } = make({ updateMatches: false, existing: { status: 'needs_attention', parkedReason: 'wrong_property' } });
+      const error = await service.retry(OUTBOX_ID, PROPERTY_ID).catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(ConflictException);
+      expect((error as ConflictException).message).toContain("Add the hotel's HAIP key first");
+      expect(render(calls.where).params).not.toContain('wrong_property');
+      expect(enqueue).not.toHaveBeenCalled();
+    });
+
+    it('"Hotel not set up": once the key is set, a person may retry; the reason is cleared and it is queued', async () => {
+      process.env['HAIP_KEY_OUTBOXTEST'] = 'k';
+      const { service, calls } = make({ updateMatches: true, existing: row({ parkedReason: 'wrong_property' }) });
+      await expect(service.retry(OUTBOX_ID, PROPERTY_ID)).resolves.toMatchObject({ status: 'pending', parkedReason: null });
+      expect(render(calls.where).params).toContain('wrong_property');
+      expect(enqueue).toHaveBeenCalledExactlyOnceWith(OUTBOX_ID);
+    });
+
+    it.each(['no_in_house_guest', 'stay_ended', 'needs_verification'] as const)(
+      'refuses a row parked as %s with 409 and does not queue, key or not',
       async (parkedReason) => {
         const { service } = make({ updateMatches: false, existing: { status: 'needs_attention', parkedReason } });
 

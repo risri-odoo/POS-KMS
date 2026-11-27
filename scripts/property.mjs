@@ -6,6 +6,8 @@
 //        --timezone America/New_York [--key-env HAIP_KEY_DEMO] [--if-missing] [--dry-run]
 //   node scripts/property.mjs update --id <uuid> [--name ...] [--currency ...] [--timezone ...]
 //        [--key-env HAIP_KEY_X | --key-env none] [--active true|false] [--dry-run]
+//   node scripts/property.mjs check-menu-currency   (read-only: menu items whose currency isn't
+//        their hotel's, or whose hotel isn't registered; orders with them are refused)
 //
 // --key-env is the NAME of the environment variable that holds the hotel's HAIP
 // folio-inbound key (must start with HAIP_KEY_). The key itself is never stored, read or
@@ -120,14 +122,22 @@ function statementFor(command, fields, ifMissing = false) {
 }
 
 const { command, options } = parseArgs(process.argv.slice(2));
-if (!['list', 'add', 'update'].includes(command)) fail('usage: property.mjs list | add ... | update ... (see the top of this file)');
+const CHECK_MENU_CURRENCY =
+  'select m.id, m.name, m.currency_code as item_currency, m.property_id, p.name as hotel, p.currency_code as hotel_currency ' +
+  'from menu_items m left join properties p on p.id = m.property_id ' +
+  'where p.id is null or m.currency_code <> p.currency_code order by p.name nulls first, m.name';
 
-const fields = command === 'list' ? {} : validate(options, command === 'add' ? ['id', 'name', 'currency', 'timezone'] : ['id']);
+if (!['list', 'add', 'update', 'check-menu-currency'].includes(command)) fail('usage: property.mjs list | add ... | update ... | check-menu-currency (see the top of this file)');
+const readOnly = command === 'list' || command === 'check-menu-currency';
+
+const fields = readOnly ? validate(options, []) : validate(options, command === 'add' ? ['id', 'name', 'currency', 'timezone'] : ['id']);
+if (readOnly && Object.keys(fields).length > 0) fail(`${command} takes no options except --dry-run`);
 if (options.ifMissing && command !== 'add') fail('--if-missing only goes with add');
-const statement = command === 'list' ? null : statementFor(command, fields, options.ifMissing);
+const statement = readOnly ? null : statementFor(command, fields, options.ifMissing);
 
 if (options.dryRun) {
-  console.log(JSON.stringify(statement ?? { text: 'select * from properties order by name', values: [] }));
+  const readSql = command === 'check-menu-currency' ? CHECK_MENU_CURRENCY : 'select * from properties order by name';
+  console.log(JSON.stringify(statement ?? { text: readSql, values: [] }));
   process.exit(0);
 }
 
@@ -142,6 +152,14 @@ try {
       const key = r.haip_api_key_env ? `${r.haip_api_key_env} (${process.env[r.haip_api_key_env] ? 'set here' : 'NOT set here'})` : 'no HAIP key';
       console.log(`${r.id}  ${r.active ? 'active  ' : 'INACTIVE'}  ${r.currency_code}  ${r.timezone.padEnd(20)}  ${key}  ${r.name}`);
     }
+  } else if (command === 'check-menu-currency') {
+    const rows = await sql.unsafe(CHECK_MENU_CURRENCY);
+    if (rows.length === 0) console.log('Every menu item is in its hotel’s currency.');
+    for (const r of rows) {
+      const why = r.hotel ? `priced in ${r.item_currency}, ${r.hotel} uses ${r.hotel_currency}` : `hotel ${r.property_id} is not registered`;
+      console.log(`${r.id}  ${r.name}: ${why}`);
+    }
+    if (rows.length > 0) console.log(`${rows.length} item(s) to fix. Orders with them are refused (400) until a manager changes or replaces them.`);
   } else {
     const result = await sql.unsafe(statement.text, statement.values);
     if (command === 'update' && result.count === 0) fail(`no property with id ${fields.id}`);

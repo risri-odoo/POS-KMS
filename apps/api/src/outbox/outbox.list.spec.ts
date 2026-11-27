@@ -6,13 +6,14 @@ import { haipPostOutbox } from '@stayx/database';
 import type { Db } from '../database/database.module.js';
 import type { HaipQueue } from '../haip/haip-queue.service.js';
 import { OutboxService } from './outbox.service.js';
+import type { PropertyDirectory } from '../properties/properties.service.js';
 
 const PROPERTY = 'a0000001-0000-4000-a000-000000000001';
 
 const whereOf = (sql: string) => sql.slice(sql.indexOf(' where '));
 
 /** The real query, captured through drizzle's pg-proxy driver; answers with `rows`. */
-function capture(rows: unknown[][] = []) {
+function capture(rows: unknown[][] = [], directory: PropertyDirectory = { find: () => Promise.resolve(null) }) {
   const seen: { sql: string; params: unknown[] }[] = [];
   const db = drizzle(
     async (sql, params) => {
@@ -21,7 +22,7 @@ function capture(rows: unknown[][] = []) {
     },
     { schema },
   );
-  return { service: new OutboxService(db as unknown as Db, {} as HaipQueue), seen };
+  return { service: new OutboxService(db as unknown as Db, {} as HaipQueue, directory), seen };
 }
 
 describe('OutboxService.list', () => {
@@ -83,6 +84,24 @@ describe('OutboxService.list', () => {
       guestName: 'Ada L.',
     });
     expect(entry).not.toHaveProperty('roomNumber');
+  });
+
+  it('retryAllowed: "Hotel not set up" only once the hotel’s key is set; resolve-only reasons never', async () => {
+    const columns = Object.keys(getTableColumns(haipPostOutbox));
+    const rowWith = (id: string, status: string, parkedReason: string | null) => [
+      ...columns.map((c) => ({ id, status, parkedReason, propertyId: PROPERTY })[c as 'id'] ?? null),
+      null, null, null, null, null, null, null, null,
+    ];
+    const rows = [rowWith('a', 'needs_attention', 'wrong_property'), rowWith('b', 'needs_attention', 'stay_ended'), rowWith('c', 'failed', null), rowWith('d', 'posted', null)];
+    const hotel = (keyEnv: string) => ({ find: () => Promise.resolve({ id: PROPERTY, name: 'Demo hotel', haipApiKeyEnv: keyEnv, active: true } as never) });
+
+    process.env['HAIP_KEY_LISTTEST'] = 'k';
+    const withKey = await capture(rows, hotel('HAIP_KEY_LISTTEST')).service.list({ propertyId: PROPERTY, view: 'all' });
+    expect(withKey.map((e) => [e.id, e.retryAllowed])).toEqual([['a', true], ['b', false], ['c', true], ['d', false]]);
+
+    delete process.env['HAIP_KEY_LISTTEST'];
+    const withoutKey = await capture(rows, hotel('HAIP_KEY_LISTTEST')).service.list({ propertyId: PROPERTY, view: 'all' });
+    expect(withoutKey.find((e) => e.id === 'a')!.retryAllowed).toBe(false);
   });
 
   it('order is null if the order row is missing (never another hotel’s order)', async () => {

@@ -66,7 +66,6 @@ export interface MenuItemForm {
   category: string;
   description: string;
   price: string;
-  currencyCode: string;
   sortOrder: string;
 }
 
@@ -83,8 +82,6 @@ export function validateMenuItemForm(form: MenuItemForm): MenuItemFormErrors {
 
   const priceError = validatePrice(form.price);
   if (priceError) errors.price = priceError;
-
-  if (!/^[A-Za-z]{3}$/.test(form.currencyCode.trim())) errors.currencyCode = 'Use a 3-letter code like USD';
 
   const sort = form.sortOrder.trim();
   if (sort !== '' && !/^\d{1,6}$/.test(sort)) errors.sortOrder = 'Sort order must be a whole number ≥ 0';

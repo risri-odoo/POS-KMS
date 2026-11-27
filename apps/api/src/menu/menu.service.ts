@@ -1,16 +1,26 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, asc, eq, inArray } from 'drizzle-orm';
 import { menuItems } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
+import { PROPERTY_DIRECTORY, type PropertyDirectory } from '../properties/properties.service.js';
 import type { CreateMenuItemDto, ListMenuItemsDto, UpdateMenuItemDto } from './dto/menu-item.dto.js';
 
 export type MenuItem = typeof menuItems.$inferSelect;
 
 @Injectable()
 export class MenuService {
-  constructor(@Inject(DRIZZLE) private readonly db: Db) {}
+  constructor(
+    @Inject(DRIZZLE) private readonly db: Db,
+    @Inject(PROPERTY_DIRECTORY) private readonly directory: PropertyDirectory,
+  ) {}
 
+  /** In the hotel's currency (AUDIT.md item 5). A different currencyCode is refused, not converted. */
   async create(dto: CreateMenuItemDto): Promise<MenuItem> {
+    const property = await this.directory.find(dto.propertyId);
+    if (!property) throw new NotFoundException('Unknown property');
+    if (dto.currencyCode && dto.currencyCode.toUpperCase() !== property.currencyCode) {
+      throw new BadRequestException(`Menu items for ${property.name} must be priced in ${property.currencyCode}, not ${dto.currencyCode.toUpperCase()}`);
+    }
     const [item] = await this.db
       .insert(menuItems)
       .values({
@@ -19,7 +29,7 @@ export class MenuService {
         name: dto.name,
         description: dto.description,
         price: dto.price,
-        currencyCode: dto.currencyCode.toUpperCase(),
+        currencyCode: property.currencyCode,
         isAvailable: dto.isAvailable ?? true,
         sortOrder: dto.sortOrder ?? 0,
       })

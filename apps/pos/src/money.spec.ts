@@ -61,7 +61,6 @@ describe('validateMenuItemForm', () => {
     category: 'Mains',
     description: '',
     price: '12.50',
-    currencyCode: 'USD',
     sortOrder: '',
   };
 
@@ -75,9 +74,8 @@ describe('validateMenuItemForm', () => {
       category: 'x'.repeat(101),
       description: '',
       price: '1.234',
-      currencyCode: 'US',
       sortOrder: '-1',
     });
-    expect(Object.keys(errors).sort()).toEqual(['category', 'currencyCode', 'name', 'price', 'sortOrder']);
+    expect(Object.keys(errors).sort()).toEqual(['category', 'name', 'price', 'sortOrder']);
   });
 });

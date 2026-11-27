@@ -50,6 +50,12 @@ describe('manualRetryAllowed (Retry)', () => {
     expect(sql).toBe('("haip_post_outbox"."parked_reason" is null or "haip_post_outbox"."parked_reason" = $1)');
     expect(params).toEqual(['haip_rejected']);
   });
+
+  it('also lets "Hotel not set up" through once the hotel’s key is set (a person’s Retry only)', () => {
+    const { sql, params } = new PgDialect().sqlToQuery(manualRetryAllowed(true));
+    expect(sql).toBe('("haip_post_outbox"."parked_reason" is null or "haip_post_outbox"."parked_reason" = $1 or "haip_post_outbox"."parked_reason" = $2)');
+    expect(params).toEqual(['haip_rejected', 'wrong_property']);
+  });
 });
 
 describe('isResolveOnly', () => {
@@ -59,6 +65,11 @@ describe('isResolveOnly', () => {
 
   it.each([null, undefined, 'haip_rejected'] as const)('%j is not resolve-only', (reason) => {
     expect(isResolveOnly(reason)).toBe(false);
+  });
+
+  it('"Hotel not set up" stops being resolve-only once the hotel’s key is set; the others never do', () => {
+    expect(isResolveOnly('wrong_property', true)).toBe(false);
+    for (const reason of ['no_in_house_guest', 'stay_ended', 'needs_verification'] as const) expect(isResolveOnly(reason, true)).toBe(true);
   });
 });
 

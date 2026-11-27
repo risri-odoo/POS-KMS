@@ -2,6 +2,7 @@ import { Global, Module } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { PROPERTY_CACHE_MS, PROPERTY_DIRECTORY, PropertiesService } from './properties.service.js';
 import { PropertyGuard } from './property.guard.js';
+import { PropertiesController } from './properties.controller.js';
 
 /**
  * Known hotels (AUDIT.md item 4). Imported in AppModule AFTER AuthModule: global guards run
@@ -9,6 +10,7 @@ import { PropertyGuard } from './property.guard.js';
  */
 @Global()
 @Module({
+  controllers: [PropertiesController],
   providers: [
     { provide: 'PROPERTY_CACHE_MS', useValue: PROPERTY_CACHE_MS },
     { provide: 'NOW', useValue: Date.now },
