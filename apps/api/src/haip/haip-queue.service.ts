@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common
 import { Queue, type JobsOptions } from 'bullmq';
 import { HAIP_CONFIG, redisConnectionOptions, type HaipConfig } from './haip.config.js';
 import { throttledLog } from './throttled-log.js';
+import { hasCounterCommands, type RedisCounterCommands } from '../stays/rate-limit-store.js';
 
 export const HAIP_QUEUE_NAME = 'haip-post-outbox';
 export const HAIP_JOB_NAME = 'post-charge';
@@ -68,6 +69,17 @@ export class HaipQueue implements OnModuleDestroy {
     if (!this.active) return 'not_used';
     await this.getQueue().getJobCounts('wait');
     return 'up';
+  }
+
+  /**
+   * The queue's Redis connection, for small shared counters (the stay-lookup limit), or
+   * null when the bridge is off or the client lacks the commands. Reuses the connection
+   * rather than adding a Redis client package.
+   */
+  async redisCounterClient(): Promise<RedisCounterCommands | null> {
+    if (!this.active) return null;
+    const client: unknown = await this.getQueue().client;
+    return hasCounterCommands(client) ? client : null;
   }
 
   async onModuleDestroy() {
