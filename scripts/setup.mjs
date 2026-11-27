@@ -97,6 +97,13 @@ runOrExit('pnpm', ['--filter', '@stayx/database', 'run', 'build']);
 step('Applying database migrations (pnpm db:migrate)');
 runOrExit('pnpm', ['db:migrate']);
 
+// Every request must name a registered hotel (AUDIT.md item 4); register the demo one.
+step('Registering the demo hotel (scripts/property.mjs)');
+runOrExit('node', [
+  'scripts/property.mjs', 'add', '--id', 'a0000001-0000-4000-a000-000000000001', '--name', 'Demo hotel',
+  '--currency', 'USD', '--timezone', 'America/New_York', '--key-env', 'HAIP_KEY_DEMO', '--if-missing',
+]);
+
 console.log(`
 ✔ Setup complete.
 

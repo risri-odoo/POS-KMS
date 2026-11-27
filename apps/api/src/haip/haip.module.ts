@@ -14,7 +14,7 @@ import { STAY_LOOKUP } from './stay-lookup.js';
     {
       provide: HAIP_CLIENT,
       inject: [HAIP_CONFIG],
-      useFactory: (config: HaipConfig) => new HaipClient({ apiUrl: config.apiUrl, apiKey: config.apiKey ?? '' }),
+      useFactory: (config: HaipConfig) => new HaipClient({ apiUrl: config.apiUrl }),
     },
     // Throws for HAIP_STAY_LOOKUP=fake in production, which stops the API from starting.
     { provide: STAY_LOOKUP, useFactory: () => createStayLookup() },

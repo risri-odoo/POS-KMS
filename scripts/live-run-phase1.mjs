@@ -81,7 +81,7 @@ async function startPos(label) {
       // These runs call the API without a token; the login checks are tested in Step G.
       POS_AUTH_ENABLED: 'false',
       DATABASE_URL: 'postgres://stayx:stayx@localhost:5433/stayx_pos_live', REDIS_URL: 'redis://localhost:6380/1',
-      HAIP_API_URL: HAIP_AUTH, HAIP_API_KEY: key, HAIP_PROPERTY_ID: PROP, HAIP_TIMEZONE: 'America/New_York',
+      HAIP_API_URL: HAIP_AUTH, HAIP_BRIDGE_ENABLED: 'true', HAIP_KEY_LIVE: key,
     },
   });
   const out = createWriteStream(logFile);

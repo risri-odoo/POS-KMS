@@ -25,7 +25,9 @@ describe('KitchenGateway', () => {
 
   beforeEach(() => {
     // Login off: the behaviour before Step D. Login on is tested in kitchen.gateway.auth.spec.ts.
-    gateway = new KitchenGateway(loadAuthConfig({ POS_AUTH_ENABLED: 'false' }), null);
+    gateway = new KitchenGateway(loadAuthConfig({ POS_AUTH_ENABLED: 'false' }), null, {
+      find: (id: string) => Promise.resolve(id === PROPERTY_A ? ({ id } as never) : null),
+    });
     socket = fakeSocket();
   });
 

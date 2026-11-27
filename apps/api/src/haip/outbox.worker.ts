@@ -40,12 +40,9 @@ export class OutboxWorker implements OnApplicationBootstrap, OnModuleDestroy {
       );
       return;
     }
-    if (!this.config.propertyId) {
-      this.logger.warn('HAIP_PROPERTY_ID is not set: every outbox row will be marked needs_attention.');
-    }
     if (!this.queue.active) return; // NODE_ENV=test
 
-    this.logger.log(`HAIP bridge enabled: posting to ${this.config.apiUrl} for property ${this.config.propertyId ?? '(none)'}`);
+    this.logger.log(`HAIP bridge enabled: posting to ${this.config.apiUrl}, each hotel with its own key (properties table)`);
     this.worker = new Worker<HaipJobData>(HAIP_QUEUE_NAME, (job) => this.processor.process(job), {
       connection: redisConnectionOptions(this.config.redisUrl),
       concurrency: 2,

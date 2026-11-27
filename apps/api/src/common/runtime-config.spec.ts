@@ -44,11 +44,11 @@ describe('production', () => {
     expect(productionConfigProblems(prod({ DATABASE_URL: PROD_DB, CORS_ORIGINS: 'https://pos.example.com' }))).toEqual([]);
   });
 
-  it('with a HAIP key, needs Redis and HAIP’s real address too', () => {
-    const base = prod({ DATABASE_URL: PROD_DB, CORS_ORIGINS: 'https://pos.example.com', HAIP_API_KEY: 'k' });
+  it('with the HAIP bridge on, needs Redis and HAIP’s real address too', () => {
+    const base = prod({ DATABASE_URL: PROD_DB, CORS_ORIGINS: 'https://pos.example.com', HAIP_BRIDGE_ENABLED: 'true' });
     expect(productionConfigProblems(base)).toEqual([
       'REDIS_URL must be set when NODE_ENV=production (there is no production default)',
-      'HAIP_API_URL must be set when NODE_ENV=production and HAIP_API_KEY is set',
+      'HAIP_API_URL must be set when NODE_ENV=production and HAIP_BRIDGE_ENABLED=true',
     ]);
     expect(productionConfigProblems({ ...base, REDIS_URL: 'rediss://cache.internal:6380', HAIP_API_URL: 'https://haip.example.com/api/v1' })).toEqual([]);
   });

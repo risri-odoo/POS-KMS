@@ -19,13 +19,13 @@ function respond(status: number, body: unknown) {
 }
 
 function client(fetchImpl: typeof fetch, timeoutMs?: number) {
-  return new HaipClient({ apiUrl: 'http://haip.test/api/v1', apiKey: KEY, fetchImpl, ...(timeoutMs ? { timeoutMs } : {}) });
+  return new HaipClient({ apiUrl: 'http://haip.test/api/v1', fetchImpl, ...(timeoutMs ? { timeoutMs } : {}) });
 }
 
 describe('HaipClient', () => {
   it('POSTs the charge as JSON with x-api-key to /folio-inbound/charges', async () => {
     const fetchMock = respond(201, { id: 'charge-1', taxCharges: [] });
-    await client(fetchMock).postCharge(charge);
+    await client(fetchMock).postCharge(charge, KEY);
 
     const [url, init] = fetchMock.mock.calls[0]!;
     expect(url).toBe('http://haip.test/api/v1/folio-inbound/charges');
@@ -37,21 +37,21 @@ describe('HaipClient', () => {
   });
 
   it('201 → created with the charge id', async () => {
-    expect(await client(respond(201, { id: 'charge-1' })).postCharge(charge)).toEqual({ kind: 'created', chargeId: 'charge-1' });
+    expect(await client(respond(201, { id: 'charge-1' })).postCharge(charge, KEY)).toEqual({ kind: 'created', chargeId: 'charge-1' });
   });
 
   it('400 → rejected with the API message', async () => {
-    const result = await client(respond(400, { statusCode: 400, message: 'Room 999 is vacant or has no in-house reservation' })).postCharge(charge);
+    const result = await client(respond(400, { statusCode: 400, message: 'Room 999 is vacant or has no in-house reservation' })).postCharge(charge, KEY);
     expect(result).toEqual({ kind: 'rejected', status: 400, message: 'HTTP 400: Room 999 is vacant or has no in-house reservation' });
   });
 
   it('joins array validation messages', async () => {
-    const result = await client(respond(400, { message: ['amount must be positive', 'roomNumber too long'] })).postCharge(charge);
+    const result = await client(respond(400, { message: ['amount must be positive', 'roomNumber too long'] })).postCharge(charge, KEY);
     expect(result).toMatchObject({ kind: 'rejected', message: 'HTTP 400: amount must be positive; roomNumber too long' });
   });
 
   it.each([500, 429, 503])('%i → unavailable', async (status) => {
-    const result = await client(respond(status, { message: 'Internal server error' })).postCharge(charge);
+    const result = await client(respond(status, { message: 'Internal server error' })).postCharge(charge, KEY);
     expect(result).toEqual({ kind: 'unavailable', status, message: `HTTP ${status}: Internal server error` });
   });
 
@@ -60,20 +60,20 @@ describe('HaipClient', () => {
       new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
       });
-    const result = await client(hang, 50).postCharge(charge);
+    const result = await client(hang, 50).postCharge(charge, KEY);
     expect(result).toEqual({ kind: 'unavailable', message: 'HAIP did not respond within 0.05s' });
   });
 
   it('network error → unavailable without throwing', async () => {
-    const result = await client(vi.fn().mockRejectedValue(new TypeError('fetch failed'))).postCharge(charge);
+    const result = await client(vi.fn().mockRejectedValue(new TypeError('fetch failed'))).postCharge(charge, KEY);
     expect(result).toEqual({ kind: 'unavailable', message: 'Could not reach HAIP: fetch failed' });
   });
 
   it('never puts the API key into a message, even if HAIP echoes it', async () => {
     const results = await Promise.all([
-      client(respond(401, { message: `Invalid key ${KEY}` })).postCharge(charge),
-      client(respond(500, `oops ${KEY}`)).postCharge(charge),
-      client(vi.fn().mockRejectedValue(new Error(`connect failed for ${KEY}`))).postCharge(charge),
+      client(respond(401, { message: `Invalid key ${KEY}` })).postCharge(charge, KEY),
+      client(respond(500, `oops ${KEY}`)).postCharge(charge, KEY),
+      client(vi.fn().mockRejectedValue(new Error(`connect failed for ${KEY}`))).postCharge(charge, KEY),
     ]);
     for (const result of results) {
       expect(JSON.stringify(result)).not.toContain(KEY);

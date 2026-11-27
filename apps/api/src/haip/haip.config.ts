@@ -5,24 +5,18 @@ export const HAIP_CONFIG = Symbol('HAIP_CONFIG');
 export interface HaipConfig {
   /** e.g. http://localhost:3000/api/v1 (no trailing slash). */
   apiUrl: string;
-  /** Connect API key bound to ONE HAIP property. Never log or return it. */
-  apiKey: string | undefined;
-  /** The property the key belongs to; rows for any other property are not posted. */
-  propertyId: string | undefined;
-  /** IANA zone used for the folio service date. */
-  timezone: string;
   redisUrl: string;
-  /** False when there is no key (or the config is unusable): outbox rows still get written. */
+  /**
+   * HAIP_BRIDGE_ENABLED=true. Off: outbox rows are still written, nothing is sent. Each
+   * hotel's key and timezone come from the properties table (AUDIT.md item 4).
+   */
   enabled: boolean;
   /** Why the bridge is disabled, for the startup warning. */
   disabledReason: string | undefined;
 }
 
-/** Development defaults. In production HAIP_API_URL and REDIS_URL must be set when a key is (runtime-config.ts). */
-const DEFAULTS = {
-  apiUrl: 'http://localhost:3000/api/v1',
-  timezone: 'America/New_York',
-};
+/** Development default. In production HAIP_API_URL and REDIS_URL must be set when the bridge is on (runtime-config.ts). */
+const DEFAULT_API_URL = 'http://localhost:3000/api/v1';
 
 export function isValidTimeZone(timeZone: string): boolean {
   try {
@@ -34,22 +28,17 @@ export function isValidTimeZone(timeZone: string): boolean {
 }
 
 export function loadHaipConfig(env: NodeJS.ProcessEnv = process.env): HaipConfig {
-  const apiKey = env['HAIP_API_KEY']?.trim() || undefined;
-  const timezone = env['HAIP_TIMEZONE']?.trim() || DEFAULTS.timezone;
-
-  let disabledReason: string | undefined;
-  if (!apiKey) disabledReason = 'HAIP_API_KEY is not set';
-  else if (!isValidTimeZone(timezone)) disabledReason = `HAIP_TIMEZONE "${timezone}" is not a valid IANA time zone`;
-
+  const flag = env['HAIP_BRIDGE_ENABLED']?.trim().toLowerCase();
+  if (flag !== undefined && flag !== '' && flag !== 'true' && flag !== 'false') {
+    throw new Error(`HAIP_BRIDGE_ENABLED must be true or false, got "${env['HAIP_BRIDGE_ENABLED']}"`);
+  }
+  const enabled = flag === 'true';
   return {
-    apiUrl: (env['HAIP_API_URL']?.trim() || DEFAULTS.apiUrl).replace(/\/+$/, ''),
-    apiKey,
-    propertyId: env['HAIP_PROPERTY_ID']?.trim() || undefined,
-    timezone,
-    // Only used when the bridge is on; production without a key needs no Redis.
-    redisUrl: apiKey ? redisUrl(env) : env['REDIS_URL']?.trim() || 'redis://localhost:6380',
-    enabled: disabledReason === undefined,
-    disabledReason,
+    apiUrl: (env['HAIP_API_URL']?.trim() || DEFAULT_API_URL).replace(/\/+$/, ''),
+    // Only used when the bridge is on; production with it off needs no Redis.
+    redisUrl: enabled ? redisUrl(env) : env['REDIS_URL']?.trim() || 'redis://localhost:6380',
+    enabled,
+    disabledReason: enabled ? undefined : 'HAIP_BRIDGE_ENABLED is not true',
   };
 }
 

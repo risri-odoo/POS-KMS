@@ -4,7 +4,7 @@ import { haipPostOutbox, orderItems, orders } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { buildInboundCharge } from './charge-mapper.js';
 import { HaipClient } from './haip-client.js';
-import { HAIP_CONFIG, type HaipConfig } from './haip.config.js';
+import { PROPERTY_DIRECTORY, haipApiKeyFor, type PropertyDirectory } from '../properties/properties.service.js';
 import { HAIP_JOB_ATTEMPTS, backoffDelayMs, type HaipJobData } from './haip-queue.service.js';
 import { NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError, reasonForRejection } from './no-in-house-guard.js';
 import { STAY_LOOKUP, type StayLookup } from './stay-lookup.js';
@@ -23,7 +23,7 @@ export interface OutboxJob {
 export type ProcessOutcome = 'skipped' | 'posted' | 'needs_attention' | 'failed' | 'deferred';
 
 export const MAY_BE_POSTED_PREFIX = 'May already be posted in HAIP, verify the folio before retrying';
-export const WRONG_PROPERTY_ERROR = 'No HAIP key configured for this property';
+export const WRONG_PROPERTY_ERROR = 'Hotel not set up for HAIP posting';
 
 type OutboxRow = typeof haipPostOutbox.$inferSelect;
 
@@ -39,7 +39,7 @@ export class OutboxProcessor {
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     @Inject(HAIP_CLIENT) private readonly client: HaipClient,
-    @Inject(HAIP_CONFIG) private readonly config: HaipConfig,
+    @Inject(PROPERTY_DIRECTORY) private readonly directory: PropertyDirectory,
     @Inject(STAY_LOOKUP) private readonly stayLookup: StayLookup,
   ) {}
 
@@ -66,8 +66,12 @@ export class OutboxProcessor {
       return 'needs_attention';
     }
 
-    if (!this.config.propertyId || row.propertyId !== this.config.propertyId) {
-      await this.finish(row, { status: 'needs_attention', lastError: WRONG_PROPERTY_ERROR, parkedReason: 'wrong_property' });
+    // The hotel's own key and timezone (AUDIT.md item 4). No active hotel or no usable key: park it.
+    const property = await this.directory.find(row.propertyId);
+    const key = property ? haipApiKeyFor(property) : { ok: false as const, reason: `property ${row.propertyId} is unknown or inactive` };
+    if (!property || !key.ok) {
+      await this.finish(row, { status: 'needs_attention', lastError: `${WRONG_PROPERTY_ERROR}: ${key.ok ? 'unknown' : key.reason}`, parkedReason: 'wrong_property' });
+      this.logger.warn(`Not sending ${row.vendorTxnId}: ${key.ok ? 'no property' : key.reason}`);
       return 'needs_attention';
     }
 
@@ -123,8 +127,8 @@ export class OutboxProcessor {
     }
 
     // Post by the room the stay is in now (follows room moves), or the order's room on today's path.
-    const charge = buildInboundCharge({ ...order, roomNumber: decision.roomNumber, items }, row.vendorTxnId, this.config.timezone);
-    const result = await this.client.postCharge(charge);
+    const charge = buildInboundCharge({ ...order, roomNumber: decision.roomNumber, items }, row.vendorTxnId, property.timezone);
+    const result = await this.client.postCharge(charge, key.apiKey);
     const attempts = row.attempts + 1;
 
     switch (result.kind) {

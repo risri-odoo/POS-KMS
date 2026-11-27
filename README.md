@@ -16,7 +16,7 @@ This repository is a working demo you can run on your own computer.
 ```bash
 git clone <this-repo-url> stayx-pos
 cd stayx-pos
-pnpm run setup      # install, start the database, apply migrations (first time only)
+pnpm run setup      # install, start the database, apply migrations, register the demo hotel (first time only)
 pnpm dev:all        # start the API, kitchen display and POS. Leave this running.
 ```
 
@@ -71,7 +71,7 @@ A **NestJS API** (`apps/api`, port 4000) stores the menu, orders and an outbox o
 ## Not built yet
 
 - **Login and permissions.** There are no user accounts; anyone with access can do everything.
-- **Live hotel-system (HAIP) posting is OFF by default** and has only been tested against a simulated HAIP, never a real one. To try it, copy `.env.example` to `.env` and set `HAIP_API_KEY`, `HAIP_PROPERTY_ID` and `HAIP_API_URL`.
+- **Live hotel-system (HAIP) posting is OFF by default** and has only been tested against a simulated HAIP, never a real one. To try it, copy `.env.example` to `.env`, set `HAIP_BRIDGE_ENABLED=true`, `HAIP_API_URL` and the hotel's key variable (e.g. `HAIP_KEY_DEMO`), and register the hotel with `node scripts/property.mjs add ... --key-env HAIP_KEY_DEMO`.
 - **Room validation.** Any room number is accepted; the system doesn't check that a guest is staying in that room.
 - **QR-code ordering for guests.** Only staff can place orders today.
 

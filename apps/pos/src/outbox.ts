@@ -27,7 +27,7 @@ export const REASON_TEXT: Record<ParkedReason, string> = {
   no_in_house_guest: 'HAIP had no guest checked in to that room.',
   stay_ended: "The guest's stay ended before the charge could be posted.",
   needs_verification: 'Placed as unverified, and no single checked-in guest could be matched to the room.',
-  wrong_property: "This hotel isn't the one the HAIP connection is set up for.",
+  wrong_property: "This hotel isn't set up for HAIP posting (no HAIP key). Post it in HAIP and resolve it, or ask an admin to set the hotel up.",
   haip_rejected: 'HAIP rejected the charge. Fix the cause (see the error), then Retry.',
 };
 
@@ -35,7 +35,7 @@ export const REASON_LABEL: Record<ParkedReason, string> = {
   no_in_house_guest: 'No guest in room',
   stay_ended: 'Stay ended',
   needs_verification: 'Needs verification',
-  wrong_property: 'Wrong hotel',
+  wrong_property: 'Hotel not set up',
   haip_rejected: 'Rejected by HAIP',
 };
 

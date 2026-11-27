@@ -109,9 +109,8 @@ async function startPos() {
       DATABASE_URL: 'postgres://stayx:stayx@localhost:5433/stayx_pos_live',
       REDIS_URL: 'redis://localhost:6380/1',
       HAIP_API_URL: HAIP_AUTH,
-      HAIP_API_KEY: key,
-      HAIP_PROPERTY_ID: PROP,
-      HAIP_TIMEZONE: 'America/New_York',
+      HAIP_BRIDGE_ENABLED: 'true',
+      HAIP_KEY_LIVE: key,
     },
   });
   posProc.stdout.pipe(out);

@@ -13,6 +13,7 @@ import { allowOrigin } from '../common/cors.js';
 import { AUTH_CONFIG, type AuthConfig } from '../auth/auth.config.js';
 import { POS_ROLES } from '../auth/roles.decorator.js';
 import { InvalidTokenError, TOKEN_VERIFIER, type AuthPrincipal, type TokenVerifier } from '../auth/token-verifier.js';
+import { PROPERTY_DIRECTORY, type PropertyDirectory } from '../properties/properties.service.js';
 
 /** The Socket.IO room for one property. The only place the room name is built. */
 export function roomFor(propertyId: string): string {
@@ -23,6 +24,7 @@ export type RoomAck = { ok: true; room: string } | { ok: false; error: string };
 
 const INVALID_PROPERTY_ID: RoomAck = { ok: false, error: 'propertyId must be a UUID' };
 const NO_ACCESS: RoomAck = { ok: false, error: 'No access to this property' };
+const UNKNOWN_PROPERTY: RoomAck = { ok: false, error: 'Unknown property' };
 
 /** Handshake refusals, as the client sees them in connect_error. The reason is only logged. */
 export const SOCKET_UNAUTHORIZED = 'unauthorized';
@@ -62,6 +64,7 @@ export class KitchenGateway implements OnGatewayInit {
   constructor(
     @Inject(AUTH_CONFIG) private readonly config: AuthConfig,
     @Inject(TOKEN_VERIFIER) private readonly verifier: TokenVerifier | null,
+    @Inject(PROPERTY_DIRECTORY) private readonly directory: PropertyDirectory,
   ) {}
 
   afterInit(server: Server): void {
@@ -114,6 +117,8 @@ export class KitchenGateway implements OnGatewayInit {
         return NO_ACCESS;
       }
     }
+    // After the token check, as on HTTP: an unknown hotel is only reported to someone allowed to ask.
+    if (!(await this.directory.find(propertyId))) return UNKNOWN_PROPERTY;
     const room = roomFor(propertyId);
     await client.join(room);
     this.logger.debug(`Socket ${client.id} joined ${room}`);

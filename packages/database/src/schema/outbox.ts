@@ -15,7 +15,7 @@ export const outboxStatus = pgEnum('outbox_status', ['pending', 'posted', 'faile
  * - no_in_house_guest: HAIP said the room had no in-house guest. Never re-sent by room.
  * - stay_ended: the bound stay checked out or vanished before posting.
  * - needs_verification: no single in-house stay to bind an unverified order to.
- * - wrong_property: the row's property isn't the one the HAIP key belongs to.
+ * - wrong_property: the row's hotel isn't set up for HAIP posting (unknown, inactive, or no usable HAIP key).
  * - haip_rejected: any other 4xx from HAIP.
  */
 export const parkedReason = pgEnum('parked_reason', [

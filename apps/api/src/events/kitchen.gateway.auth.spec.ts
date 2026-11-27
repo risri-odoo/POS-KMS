@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { Logger, type INestApplication } from '@nestjs/common';
+import { Global, Logger, Module, type INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import type { AddressInfo } from 'node:net';
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair, type CryptoKey } from 'jose';
@@ -9,6 +9,7 @@ import { TOKEN_VERIFIER, TokenVerifier } from '../auth/token-verifier.js';
 import { EventsModule } from './events.module.js';
 import { OrderEventsService } from './order-events.service.js';
 import type { OrderWithItems } from '../orders/orders.service.js';
+import { PROPERTY_DIRECTORY } from '../properties/properties.service.js';
 
 /**
  * The real gateway on a local port, spoken to in raw Socket.IO (Engine.IO v4) over
@@ -20,6 +21,13 @@ import type { OrderWithItems } from '../orders/orders.service.js';
 const ISSUER = 'http://localhost:8080/realms/haip';
 const A = 'a0000001-0000-4000-a000-00000000000a';
 const B = 'b0000002-0000-4000-a000-00000000000b';
+/** Known to the token (property_ids) but not a registered hotel. */
+const UNREGISTERED = 'c0000003-0000-4000-a000-00000000000c';
+
+/** The hotels the API knows (PropertiesModule stand-in). */
+@Global()
+@Module({ providers: [{ provide: PROPERTY_DIRECTORY, useValue: { find: (id: string) => Promise.resolve([A, B].includes(id) ? { id } : null) } }], exports: [PROPERTY_DIRECTORY] })
+class KnownHotels {}
 
 let app: INestApplication;
 let url: string;
@@ -99,7 +107,7 @@ beforeAll(async () => {
   // No clock allowance here, so the expiry test needn't wait 30 s.
   const config = { ...loadAuthConfig({ POS_OIDC_ISSUER: ISSUER }), clockToleranceSeconds: 0 };
 
-  const moduleRef = await Test.createTestingModule({ imports: [AuthModule, EventsModule] })
+  const moduleRef = await Test.createTestingModule({ imports: [AuthModule, KnownHotels, EventsModule] })
     .overrideProvider(AUTH_CONFIG)
     .useValue(config)
     .overrideProvider(TOKEN_VERIFIER)
@@ -132,6 +140,14 @@ describe('kitchen socket with staff login on', () => {
   it('refuses a valid token without a POS role', async () => {
     const socket = new RawSocket({ token: await token(['some_haip_role'], [A]) });
     expect(await socket.connected()).toBe('forbidden');
+    socket.close();
+  });
+
+  it('a hotel in the token but not registered: join refused as unknown', async () => {
+    const socket = new RawSocket({ token: await token(['pos_kitchen'], [A, UNREGISTERED]) });
+    expect(await socket.connected()).toBe('ok');
+    expect(await socket.emitWithAck('joinProperty', { propertyId: UNREGISTERED })).toEqual({ ok: false, error: 'Unknown property' });
+    expect(await socket.emitWithAck('joinProperty', { propertyId: A })).toEqual({ ok: true, room: `property:${A}` });
     socket.close();
   });
 

@@ -55,7 +55,7 @@ export function resolveOnlyMessage(reason: ParkedReason): string {
     no_in_house_guest: 'the room had no in-house guest',
     stay_ended: "the guest's stay had ended before it could be posted",
     needs_verification: 'it could not be matched to a single in-house stay',
-    wrong_property: 'there is no HAIP key for this property',
+    wrong_property: 'this hotel is not set up for HAIP posting (no active hotel or no usable HAIP key)',
     haip_rejected: 'HAIP rejected it',
   };
   return (

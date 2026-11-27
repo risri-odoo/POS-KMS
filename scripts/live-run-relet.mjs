@@ -44,7 +44,7 @@ try {
 
   posProc = spawn(process.execPath, ['dist/main.js'], {
     cwd: POS_DIR,
-    env: { ...process.env, POS_AUTH_ENABLED: 'false', PORT: '4100', DATABASE_URL: 'postgres://stayx:stayx@localhost:5433/stayx_pos_live', REDIS_URL: 'redis://localhost:6380/1', HAIP_API_URL: HAIP_AUTH, HAIP_API_KEY: key, HAIP_PROPERTY_ID: PROP, HAIP_TIMEZONE: 'America/New_York' },
+    env: { ...process.env, POS_AUTH_ENABLED: 'false', PORT: '4100', DATABASE_URL: 'postgres://stayx:stayx@localhost:5433/stayx_pos_live', REDIS_URL: 'redis://localhost:6380/1', HAIP_API_URL: HAIP_AUTH, HAIP_BRIDGE_ENABLED: 'true', HAIP_KEY_LIVE: key },
   });
   const out = createWriteStream(join(OUT, 'pos-api-relet.log'));
   posProc.stdout.pipe(out); posProc.stderr.pipe(out);

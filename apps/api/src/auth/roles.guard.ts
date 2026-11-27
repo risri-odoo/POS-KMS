@@ -12,6 +12,7 @@ import { Reflector } from '@nestjs/core';
 import { AUTH_CONFIG, type AuthConfig } from './auth.config.js';
 import type { AuthenticatedRequest } from './auth.guard.js';
 import { IS_PUBLIC } from './public.decorator.js';
+import { propertyIdsIn } from './request-properties.js';
 import { ROLES_KEY, type PosRole } from './roles.decorator.js';
 
 /** What this guard reads from the request. Runs before validation, so values are raw. */
@@ -68,11 +69,9 @@ export class RolesGuard implements CanActivate {
   }
 }
 
-/** Every propertyId the request names (query and body). Each must be a single string. */
+/** Every propertyId the request names; at least one is required on a role-protected route. */
 function requestedProperties(request: ScopedRequest): string[] {
-  const body = typeof request.body === 'object' && request.body !== null ? (request.body as Record<string, unknown>) : {};
-  const values = [request.query?.['propertyId'], body['propertyId']].filter((v) => v !== undefined);
+  const values = propertyIdsIn(request);
   if (values.length === 0) throw new BadRequestException('propertyId is required');
-  if (!values.every((v): v is string => typeof v === 'string')) throw new BadRequestException('propertyId must be a single value');
   return values;
 }

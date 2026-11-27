@@ -69,10 +69,10 @@ export function productionConfigProblems(env: NodeJS.ProcessEnv = process.env): 
   };
   check(() => databaseUrl(env));
   check(() => corsOrigins(env));
-  // The HAIP bridge is on when a key is set; then it needs Redis and HAIP's real address.
-  if (env['HAIP_API_KEY']?.trim()) {
+  // With the HAIP bridge on, it needs Redis and HAIP's real address.
+  if (env['HAIP_BRIDGE_ENABLED']?.trim().toLowerCase() === 'true') {
     check(() => redisUrl(env));
-    if (!env['HAIP_API_URL']?.trim()) problems.push('HAIP_API_URL must be set when NODE_ENV=production and HAIP_API_KEY is set');
+    if (!env['HAIP_API_URL']?.trim()) problems.push('HAIP_API_URL must be set when NODE_ENV=production and HAIP_BRIDGE_ENABLED=true');
   }
   return problems;
 }

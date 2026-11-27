@@ -9,10 +9,12 @@ import { HealthModule } from './health/health.module.js';
 import { MenuModule } from './menu/menu.module.js';
 import { OrdersModule } from './orders/orders.module.js';
 import { OutboxModule } from './outbox/outbox.module.js';
+import { PropertiesModule } from './properties/properties.module.js';
 import { StaysModule } from './stays/stays.module.js';
 
 @Module({
-  imports: [AuthModule, DatabaseModule, EventsModule, HaipModule, HealthModule, MenuModule, OrdersModule, OutboxModule, StaysModule],
+  // AuthModule then PropertiesModule: their global guards run in this order (login, roles, hotel).
+  imports: [AuthModule, PropertiesModule, DatabaseModule, EventsModule, HaipModule, HealthModule, MenuModule, OrdersModule, OutboxModule, StaysModule],
   controllers: [AppController],
   providers: [AppService],
 })

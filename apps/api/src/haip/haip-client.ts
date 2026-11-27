@@ -7,7 +7,6 @@ export type HaipPostResult =
 
 export interface HaipClientOptions {
   apiUrl: string;
-  apiKey: string;
   timeoutMs?: number;
   fetchImpl?: typeof fetch;
 }
@@ -28,7 +27,8 @@ export class HaipClient {
     this.fetchImpl = options.fetchImpl ?? fetch;
   }
 
-  async postCharge(charge: InboundCharge): Promise<HaipPostResult> {
+  /** @param apiKey the hotel's folio-inbound key (from its HAIP_KEY_* variable). */
+  async postCharge(charge: InboundCharge, apiKey: string): Promise<HaipPostResult> {
     let res: Response;
     try {
       res = await this.fetchImpl(`${this.options.apiUrl}/folio-inbound/charges`, {
@@ -36,7 +36,7 @@ export class HaipClient {
         headers: {
           'Content-Type': 'application/json',
           Accept: 'application/json',
-          'x-api-key': this.options.apiKey,
+          'x-api-key': apiKey,
         },
         body: JSON.stringify(charge),
         signal: AbortSignal.timeout(this.timeoutMs),
@@ -48,7 +48,7 @@ export class HaipClient {
         kind: 'unavailable',
         message: timedOut
           ? `HAIP did not respond within ${this.timeoutMs / 1000}s`
-          : `Could not reach HAIP: ${this.clean((error as Error)?.message ?? 'network error')}`,
+          : `Could not reach HAIP: ${this.clean((error as Error)?.message ?? 'network error', apiKey)}`,
       };
     }
 
@@ -57,7 +57,7 @@ export class HaipClient {
     if (outcome === 'posted') {
       return { kind: 'created', chargeId: this.chargeIdFrom(body) };
     }
-    const message = this.messageFrom(res.status, body);
+    const message = this.messageFrom(res.status, body, apiKey);
     return outcome === 'terminal'
       ? { kind: 'rejected', status: res.status, message }
       : { kind: 'unavailable', status: res.status, message };
@@ -72,7 +72,7 @@ export class HaipClient {
     }
   }
 
-  private messageFrom(status: number, body: string): string {
+  private messageFrom(status: number, body: string, apiKey: string): string {
     let detail = '';
     try {
       const msg = (JSON.parse(body) as { message?: unknown }).message;
@@ -80,12 +80,12 @@ export class HaipClient {
     } catch {
       detail = body;
     }
-    return this.clean(`HTTP ${status}${detail ? `: ${detail}` : ''}`);
+    return this.clean(`HTTP ${status}${detail ? `: ${detail}` : ''}`, apiKey);
   }
 
-  /** Trim, cap length and redact the key in case anything ever echoes it back. */
-  private clean(text: string): string {
-    const redacted = this.options.apiKey ? text.split(this.options.apiKey).join('[redacted]') : text;
+  /** Trim, cap length and redact the hotel's key in case anything ever echoes it back. */
+  private clean(text: string, apiKey: string): string {
+    const redacted = apiKey ? text.split(apiKey).join('[redacted]') : text;
     return redacted.replace(/\s+/g, ' ').trim().slice(0, MAX_MESSAGE);
   }
 }
