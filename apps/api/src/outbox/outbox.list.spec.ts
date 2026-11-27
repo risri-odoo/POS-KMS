@@ -7,13 +7,14 @@ import type { Db } from '../database/database.module.js';
 import type { HaipQueue } from '../haip/haip-queue.service.js';
 import { OutboxService } from './outbox.service.js';
 import type { PropertyDirectory } from '../properties/properties.service.js';
+import type { OutboxAlerts } from '../events/outbox-alerts.service.js';
 
 const PROPERTY = 'a0000001-0000-4000-a000-000000000001';
 
 const whereOf = (sql: string) => sql.slice(sql.indexOf(' where '));
 
 /** The real query, captured through drizzle's pg-proxy driver; answers with `rows`. */
-function capture(rows: unknown[][] = [], directory: PropertyDirectory = { find: () => Promise.resolve(null) }) {
+function capture(rows: unknown[][] = [], directory: PropertyDirectory = { find: () => Promise.resolve(null) }, stuckCutoff: Date | null = null) {
   const seen: { sql: string; params: unknown[] }[] = [];
   const db = drizzle(
     async (sql, params) => {
@@ -22,7 +23,8 @@ function capture(rows: unknown[][] = [], directory: PropertyDirectory = { find: 
     },
     { schema },
   );
-  return { service: new OutboxService(db as unknown as Db, {} as HaipQueue, directory), seen };
+  const alerts = { stuckCutoff: () => stuckCutoff, refresh: () => Promise.resolve() } as unknown as OutboxAlerts;
+  return { service: new OutboxService(db as unknown as Db, {} as HaipQueue, directory, alerts), seen };
 }
 
 describe('OutboxService.list', () => {
@@ -41,6 +43,14 @@ describe('OutboxService.list', () => {
     await service.list({ propertyId: PROPERTY });
     expect(seen[0]!.sql).toContain('"haip_post_outbox"."status" in ($2, $3)');
     expect(seen[0]!.params.slice(0, 3)).toEqual([PROPERTY, 'needs_attention', 'failed']);
+  });
+
+  it('with the bridge on, "Needs attention" also shows charges stuck in pending', async () => {
+    const cutoff = new Date('2026-11-27T10:00:00Z');
+    const { service, seen } = capture([], undefined, cutoff);
+    await service.list({ propertyId: PROPERTY });
+    expect(seen[0]!.sql).toContain('("haip_post_outbox"."status" in ($2, $3) or ("haip_post_outbox"."status" = $4 and "haip_post_outbox"."created_at" < $5))');
+    expect(seen[0]!.params.slice(1, 5)).toEqual(['needs_attention', 'failed', 'pending', cutoff.toISOString()]);
   });
 
   it('view=all drops the status filter; an explicit status wins over the view', async () => {

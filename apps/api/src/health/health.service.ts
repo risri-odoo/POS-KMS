@@ -2,12 +2,15 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { HaipQueue } from '../haip/haip-queue.service.js';
+import { OutboxAlerts } from '../events/outbox-alerts.service.js';
 
 export type CheckState = 'up' | 'down' | 'not_used';
 
 export interface Readiness {
   status: 'ok' | 'unavailable';
   checks: { database: CheckState; redis: CheckState };
+  /** Reported, never failed on: how long the oldest pending charge has waited (minutes). */
+  outbox: { oldestPendingMinutes: number | null };
 }
 
 /** Each dependency gets this long to answer, so a hung one can't hang the probe. */
@@ -32,6 +35,7 @@ export class HealthService {
   constructor(
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly haipQueue: HaipQueue,
+    private readonly alerts: OutboxAlerts,
     @Inject('HEALTH_CHECK_TIMEOUT_MS') private readonly timeoutMs: number = CHECK_TIMEOUT_MS,
   ) {}
 
@@ -43,7 +47,13 @@ export class HealthService {
       }),
       this.check('redis', () => this.haipQueue.ping()),
     ]);
-    return { status: database === 'down' || redis === 'down' ? 'unavailable' : 'ok', checks: { database, redis } };
+    // Information only: a backlog never makes the API "not ready".
+    const oldestPendingMinutes = database === 'up' ? await withTimeout(this.alerts.oldestPendingMinutes(), this.timeoutMs).catch(() => null) : null;
+    return {
+      status: database === 'down' || redis === 'down' ? 'unavailable' : 'ok',
+      checks: { database, redis },
+      outbox: { oldestPendingMinutes },
+    };
   }
 
   private async check(name: string, run: () => Promise<'up' | 'not_used'>): Promise<CheckState> {

@@ -152,6 +152,8 @@ export interface OutboxEntry {
   updatedAt: string;
   /** Whether the server would accept Retry now (e.g. "Hotel not set up" once its key is set). */
   retryAllowed: boolean;
+  /** Waiting to post longer than the stuck threshold (shown under "Needs attention"). */
+  stuck: boolean;
   order: {
     orderNumber: string;
     roomNumber: string;

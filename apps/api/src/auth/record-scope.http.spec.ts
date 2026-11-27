@@ -17,6 +17,7 @@ import { OrdersService } from '../orders/orders.service.js';
 import { OutboxController } from '../outbox/outbox.controller.js';
 import { OutboxService } from '../outbox/outbox.service.js';
 import { PROPERTY_DIRECTORY } from '../properties/properties.service.js';
+import { OutboxAlerts } from '../events/outbox-alerts.service.js';
 import { AUTH_CONFIG, loadAuthConfig } from './auth.config.js';
 import { AuthModule } from './auth.module.js';
 import { TOKEN_VERIFIER, TokenVerifier } from './token-verifier.js';
@@ -117,6 +118,7 @@ beforeAll(async () => {
       { provide: OrderEventsService, useValue: events },
       { provide: HaipQueue, useValue: queue },
       { provide: STAY_LOOKUP, useValue: new NotConfiguredStayLookup() },
+      { provide: OutboxAlerts, useValue: { refresh: () => Promise.resolve(), stuckCutoff: () => null } },
       // Both test hotels are registered, in USD, with no HAIP key.
       { provide: PROPERTY_DIRECTORY, useValue: { find: (id: string) => Promise.resolve({ id, name: 'Test hotel', currencyCode: 'USD', timezone: 'UTC', haipApiKeyEnv: null, active: true }) } },
     ],

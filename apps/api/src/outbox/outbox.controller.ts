@@ -4,7 +4,7 @@ import { Roles } from '../auth/roles.decorator.js';
 import { Caller } from '../auth/roles.decorator.js';
 import type { AuthPrincipal } from '../auth/token-verifier.js';
 import { OutboxService } from './outbox.service.js';
-import { ListOutboxDto, ResolveOutboxDto, RetryOutboxDto } from './dto/outbox.dto.js';
+import { ListOutboxDto, OutboxSummaryDto, ResolveOutboxDto, RetryOutboxDto } from './dto/outbox.dto.js';
 
 @ApiTags('outbox')
 @Controller('outbox')
@@ -20,6 +20,14 @@ export class OutboxController {
   @ApiResponse({ status: 200, description: 'Outbox rows, each with its order (number, room, guest, amount)' })
   list(@Query() dto: ListOutboxDto) {
     return this.outboxService.list(dto);
+  }
+
+  @Get('summary')
+  @Roles('pos_manager')
+  @ApiOperation({ summary: 'How many charges need a manager: needs attention, failed and stuck (the badge count)' })
+  @ApiResponse({ status: 200, description: '{ needsAttention, failed, stuck, total, oldestAt, stuckAfterMinutes, bridgeEnabled }' })
+  summary(@Query() dto: OutboxSummaryDto) {
+    return this.outboxService.summary(dto.propertyId);
   }
 
   @Post(':id/retry')

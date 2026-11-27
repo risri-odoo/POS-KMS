@@ -90,7 +90,7 @@ afterAll(async () => {
 describe('integration: real API, Postgres, Redis; fake HAIP', () => {
   it('health: ready with the database and Redis up', async () => {
     const res = await http().get('/api/v1/health/ready').expect(200);
-    expect(res.body).toEqual({ status: 'ok', checks: { database: 'up', redis: 'up' } });
+    expect(res.body).toEqual({ status: 'ok', checks: { database: 'up', redis: 'up' }, outbox: { oldestPendingMinutes: null } });
   });
 
   it('no token: 401; a hotel in the token but not registered: 404', async () => {

@@ -52,6 +52,12 @@ export class ListOutboxDto {
   limit?: number;
 }
 
+export class OutboxSummaryDto {
+  @ApiProperty({ description: 'Property ID' })
+  @IsUUID()
+  propertyId!: string;
+}
+
 export class RetryOutboxDto {
   @ApiPropertyOptional({ description: 'Why it is being sent again (optional)', maxLength: NOTE_MAX })
   @IsOptional()

@@ -4,6 +4,7 @@ import { haipPostOutbox, orderItems, orders } from '@stayx/database';
 import { HaipRetryableError, MAY_BE_POSTED_PREFIX, OutboxProcessor, WRONG_PROPERTY_ERROR, type OutboxJob } from './outbox.processor.js';
 import type { HaipClient, HaipPostResult } from './haip-client.js';
 import type { PropertyDirectory, PropertyRecord } from '../properties/properties.service.js';
+import type { OutboxAlerts } from '../events/outbox-alerts.service.js';
 import type { Db } from '../database/database.module.js';
 import { HAIP_NO_IN_HOUSE_TEXT, NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError } from './no-in-house-guard.js';
 import { FakeStayLookup, type FakeStay } from './fake-stay-lookup.js';
@@ -94,6 +95,7 @@ function job(attemptsMade = 0, attempts = 5): OutboxJob {
 
 describe('OutboxProcessor', () => {
   let postCharge: ReturnType<typeof vi.fn<(c: unknown) => Promise<HaipPostResult>>>;
+  const alerts = { refresh: vi.fn().mockResolvedValue(undefined) };
   const make = (
     row: ReturnType<typeof outboxRow> | undefined,
     cfg: PropertyDirectory = config,
@@ -101,11 +103,12 @@ describe('OutboxProcessor', () => {
   ) => {
     const { db, updates, orderUpdates } = fakeDb(row, opts.order);
     const lookup = opts.lookup ?? new NotConfiguredStayLookup();
-    return { processor: new OutboxProcessor(db, { postCharge } as unknown as HaipClient, cfg, lookup), updates, orderUpdates };
+    return { processor: new OutboxProcessor(db, { postCharge } as unknown as HaipClient, cfg, lookup, alerts as unknown as OutboxAlerts), updates, orderUpdates };
   };
 
   beforeEach(() => {
     process.env['HAIP_KEY_TEST'] = KEY;
+    alerts.refresh.mockClear();
     postCharge = vi.fn();
     vi.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
     vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
@@ -237,6 +240,15 @@ describe('OutboxProcessor', () => {
     expect(updates[0]).toMatchObject({ parkedReason: 'wrong_property' });
     expect(updates[0]!['lastError']).toContain(reason);
     expect(String(updates[0]!['lastError'])).not.toContain(KEY);
+  });
+
+  it('recounts the hotel’s alerts after posting or parking a charge (AUDIT item 15)', async () => {
+    postCharge.mockResolvedValue({ kind: 'created', chargeId: 'c1' });
+    await make(outboxRow()).processor.process(job());
+    expect(alerts.refresh).toHaveBeenCalledWith(PROPERTY_ID);
+    alerts.refresh.mockClear();
+    await make(outboxRow({ propertyId: '22222222-2222-4222-8222-222222222222' })).processor.process(job());
+    expect(alerts.refresh).toHaveBeenCalledWith('22222222-2222-4222-8222-222222222222');
   });
 
   it('posts with the hotel’s own key and its timezone for the service date', async () => {

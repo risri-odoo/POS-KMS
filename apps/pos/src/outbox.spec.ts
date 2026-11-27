@@ -20,7 +20,7 @@ import type { OutboxStatus, ParkedReason } from './types.js';
 
 const STATUSES: OutboxStatus[] = ['pending', 'posted', 'failed', 'needs_attention', 'resolved'];
 const REASONS: ParkedReason[] = ['no_in_house_guest', 'stay_ended', 'needs_verification', 'wrong_property', 'haip_rejected'];
-const row = (status: OutboxStatus, parkedReason: ParkedReason | null = null) => ({ status, parkedReason });
+const row = (status: OutboxStatus, parkedReason: ParkedReason | null = null) => ({ status, parkedReason, stuck: false, createdAt: '2026-11-27T10:00:00.000Z' });
 
 describe('wording', () => {
   it('has a label and tone for every status, and words for every reason and resolution type', () => {
@@ -28,6 +28,13 @@ describe('wording', () => {
     for (const r of REASONS) expect(REASON_LABEL[r] && REASON_TEXT[r]).toBeTruthy();
     expect(RESOLUTION_TYPES).toEqual(['posted_manually', 'collected_otherwise', 'written_off', 'duplicate_or_error']);
     for (const t of RESOLUTION_TYPES) expect(RESOLUTION_LABEL[t] && RESOLUTION_HINT[t]).toBeTruthy();
+  });
+
+  it('a stuck charge says how long it has waited', () => {
+    const entry = { ...row('pending'), stuck: true, createdAt: '2026-11-27T10:00:00.000Z' };
+    expect(explain(entry, Date.parse('2026-11-27T10:45:30.000Z'))).toMatch(/^Waiting to post for 45 min\./);
+    expect(canRetry({ ...entry, retryAllowed: false })).toBe(false);
+    expect(canResolve(entry)).toBe(false);
   });
 
   it('explains a row by its reason, or by its status when there is none', () => {

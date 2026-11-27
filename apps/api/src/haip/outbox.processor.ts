@@ -5,6 +5,7 @@ import { DRIZZLE, type Db } from '../database/database.module.js';
 import { buildInboundCharge } from './charge-mapper.js';
 import { HaipClient } from './haip-client.js';
 import { PROPERTY_DIRECTORY, haipApiKeyFor, type PropertyDirectory } from '../properties/properties.service.js';
+import { OutboxAlerts } from '../events/outbox-alerts.service.js';
 import { HAIP_JOB_ATTEMPTS, backoffDelayMs, type HaipJobData } from './haip-queue.service.js';
 import { NO_IN_HOUSE_GUEST_PREFIX, isNoInHouseGuestError, reasonForRejection } from './no-in-house-guard.js';
 import { STAY_LOOKUP, type StayLookup } from './stay-lookup.js';
@@ -41,6 +42,7 @@ export class OutboxProcessor {
     @Inject(HAIP_CLIENT) private readonly client: HaipClient,
     @Inject(PROPERTY_DIRECTORY) private readonly directory: PropertyDirectory,
     @Inject(STAY_LOOKUP) private readonly stayLookup: StayLookup,
+    private readonly alerts: OutboxAlerts,
   ) {}
 
   async process(job: OutboxJob): Promise<ProcessOutcome> {
@@ -202,5 +204,7 @@ export class OutboxProcessor {
           eq(haipPostOutbox.status, 'pending'),
         ),
       );
+    // Parked, failed or posted: the hotel's "needs attention" count may have changed.
+    if (changes.status) await this.alerts.refresh(row.propertyId);
   }
 }

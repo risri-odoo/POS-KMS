@@ -42,14 +42,14 @@ describe('health routes (login on)', () => {
   });
 
   it('GET /health/ready: 200 when ready, without a token', async () => {
-    readiness.mockResolvedValueOnce({ status: 'ok', checks: { database: 'up', redis: 'not_used' } });
+    readiness.mockResolvedValueOnce({ status: 'ok', checks: { database: 'up', redis: 'not_used' }, outbox: { oldestPendingMinutes: 3 } });
     const res = await request(app.getHttpServer()).get('/health/ready').expect(200);
-    expect(res.body).toEqual({ status: 'ok', checks: { database: 'up', redis: 'not_used' } });
+    expect(res.body).toEqual({ status: 'ok', checks: { database: 'up', redis: 'not_used' }, outbox: { oldestPendingMinutes: 3 } });
   });
 
   it('GET /health/ready: 503 naming the part that is down', async () => {
-    readiness.mockResolvedValueOnce({ status: 'unavailable', checks: { database: 'down', redis: 'up' } });
+    readiness.mockResolvedValueOnce({ status: 'unavailable', checks: { database: 'down', redis: 'up' }, outbox: { oldestPendingMinutes: null } });
     const res = await request(app.getHttpServer()).get('/health/ready').expect(503);
-    expect(res.body).toEqual({ status: 'unavailable', checks: { database: 'down', redis: 'up' } });
+    expect(res.body).toEqual({ status: 'unavailable', checks: { database: 'down', redis: 'up' }, outbox: { oldestPendingMinutes: null } });
   });
 });

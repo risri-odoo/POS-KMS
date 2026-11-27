@@ -201,7 +201,8 @@ function OutboxRow({ entry, onRetry, onResolve }: { entry: OutboxEntry; onRetry:
   return (
     <TableRow className="align-top">
       <TableCell>
-        <Badge tone={STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
+        {/* A stuck charge is still pending, but it needs a look: orange, like needs attention. */}
+        <Badge tone={entry.stuck ? 'orange' : STATUS_TONE[entry.status]}>{STATUS_LABEL[entry.status]}</Badge>
         {entry.parkedReason && <div className="mt-1 text-xs text-telivity-slate">{REASON_LABEL[entry.parkedReason]}</div>}
       </TableCell>
       <TableCell>

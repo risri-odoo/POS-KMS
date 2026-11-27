@@ -25,6 +25,7 @@ const EXPECTED: Record<string, string> = {
   'GET /orders/:id': 'pos_staff, pos_kitchen, pos_manager',
   'PATCH /orders/:id/status': 'pos_kitchen, pos_manager',
   'GET /outbox': 'pos_manager',
+  'GET /outbox/summary': 'pos_manager',
   'POST /outbox/:id/retry': 'pos_manager',
   'POST /outbox/:id/resolve': 'pos_manager',
 };

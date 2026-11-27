@@ -27,12 +27,17 @@ export function isValidTimeZone(timeZone: string): boolean {
   }
 }
 
-export function loadHaipConfig(env: NodeJS.ProcessEnv = process.env): HaipConfig {
+/** HAIP_BRIDGE_ENABLED=true. Throws on anything but true/false/unset. */
+export function isBridgeEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const flag = env['HAIP_BRIDGE_ENABLED']?.trim().toLowerCase();
   if (flag !== undefined && flag !== '' && flag !== 'true' && flag !== 'false') {
     throw new Error(`HAIP_BRIDGE_ENABLED must be true or false, got "${env['HAIP_BRIDGE_ENABLED']}"`);
   }
-  const enabled = flag === 'true';
+  return flag === 'true';
+}
+
+export function loadHaipConfig(env: NodeJS.ProcessEnv = process.env): HaipConfig {
+  const enabled = isBridgeEnabled(env);
   return {
     apiUrl: (env['HAIP_API_URL']?.trim() || DEFAULT_API_URL).replace(/\/+$/, ''),
     // Only used when the bridge is on; production with it off needs no Redis.

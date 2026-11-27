@@ -5,6 +5,7 @@ import { PgDialect } from 'drizzle-orm/pg-core';
 import { OutboxService, type OutboxRow } from './outbox.service.js';
 import type { AuthPrincipal } from '../auth/token-verifier.js';
 import type { PropertyDirectory } from '../properties/properties.service.js';
+import type { OutboxAlerts } from '../events/outbox-alerts.service.js';
 import type { HaipQueue } from '../haip/haip-queue.service.js';
 import type { Db } from '../database/database.module.js';
 import { HAIP_NO_IN_HOUSE_TEXT, NO_IN_HOUSE_GUEST_PREFIX } from '../haip/no-in-house-guard.js';
@@ -70,13 +71,14 @@ const render = (where: SQL | undefined) => new PgDialect().sqlToQuery(where!);
 
 describe('OutboxService', () => {
   let enqueue: ReturnType<typeof vi.fn<(id: string) => Promise<void>>>;
+  const alerts = { refresh: vi.fn().mockResolvedValue(undefined), stuckCutoff: () => null };
   /** The rows' hotel; its key variable is HAIP_KEY_OUTBOXTEST, set or not per test. */
   const hotel: PropertyDirectory = {
     find: () => Promise.resolve({ id: PROPERTY_ID, name: 'Demo hotel', haipApiKeyEnv: 'HAIP_KEY_OUTBOXTEST', active: true } as never),
   };
   const make = (opts: Parameters<typeof fakeDb>[0]) => {
     const { db, calls } = fakeDb(opts);
-    return { service: new OutboxService(db, { enqueue } as unknown as HaipQueue, hotel), calls };
+    return { service: new OutboxService(db, { enqueue } as unknown as HaipQueue, hotel, alerts as unknown as OutboxAlerts), calls };
   };
 
   beforeEach(() => {
@@ -154,6 +156,13 @@ describe('OutboxService', () => {
     it('404 when the row is not in this property', async () => {
       const { service } = make({ updateMatches: false });
       await expect(service.retry(OUTBOX_ID, PROPERTY_ID)).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('recounts the hotel’s alerts after a retry', async () => {
+      alerts.refresh.mockClear();
+      const { service } = make({ updateMatches: true, existing: row() });
+      await service.retry(OUTBOX_ID, PROPERTY_ID);
+      expect(alerts.refresh).toHaveBeenCalledWith(PROPERTY_ID);
     });
 
     it('records who retried, when, and the optional note', async () => {

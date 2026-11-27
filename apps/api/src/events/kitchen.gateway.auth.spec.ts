@@ -10,6 +10,7 @@ import { EventsModule } from './events.module.js';
 import { OrderEventsService } from './order-events.service.js';
 import type { OrderWithItems } from '../orders/orders.service.js';
 import { PROPERTY_DIRECTORY } from '../properties/properties.service.js';
+import { DRIZZLE } from '../database/database.module.js';
 
 /**
  * The real gateway on a local port, spoken to in raw Socket.IO (Engine.IO v4) over
@@ -26,7 +27,14 @@ const UNREGISTERED = 'c0000003-0000-4000-a000-00000000000c';
 
 /** The hotels the API knows (PropertiesModule stand-in). */
 @Global()
-@Module({ providers: [{ provide: PROPERTY_DIRECTORY, useValue: { find: (id: string) => Promise.resolve([A, B].includes(id) ? { id } : null) } }], exports: [PROPERTY_DIRECTORY] })
+@Module({
+  providers: [
+    { provide: PROPERTY_DIRECTORY, useValue: { find: (id: string) => Promise.resolve([A, B].includes(id) ? { id } : null) } },
+    // OutboxAlerts (in EventsModule) needs a database; its timer is off under NODE_ENV=test.
+    { provide: DRIZZLE, useValue: {} },
+  ],
+  exports: [PROPERTY_DIRECTORY, DRIZZLE],
+})
 class KnownHotels {}
 
 let app: INestApplication;

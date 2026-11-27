@@ -82,8 +82,14 @@ export function retryBlockedReason(entry: Pick<OutboxEntry, 'status' | 'parkedRe
   return null;
 }
 
+/** Whole minutes a charge has waited since it was created (delivery). */
+export function waitedMinutes(entry: Pick<OutboxEntry, 'createdAt'>, now: number): number {
+  return Math.max(0, Math.floor((now - Date.parse(entry.createdAt)) / 60_000));
+}
+
 /** The plain-words explanation for a row. */
-export function explain(entry: Pick<OutboxEntry, 'status' | 'parkedReason'>): string {
+export function explain(entry: Pick<OutboxEntry, 'status' | 'parkedReason' | 'stuck' | 'createdAt'>, now: number = Date.now()): string {
+  if (entry.stuck) return `Waiting to post for ${waitedMinutes(entry, now)} min. It is retried automatically; check the error below.`;
   if (entry.parkedReason) return REASON_TEXT[entry.parkedReason];
   if (entry.status === 'failed') return 'HAIP could not be reached after several tries. The charge may or may not be on the folio.';
   if (entry.status === 'needs_attention') return 'Needs a person: see the error.';

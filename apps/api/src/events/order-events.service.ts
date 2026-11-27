@@ -26,6 +26,14 @@ export class OrderEventsService {
     this.emit(ORDER_STATUS_CHANGED, order.propertyId, order);
   }
 
+  /**
+   * The hotel's count of charges needing a manager (AUDIT.md item 15). Sent to the hotel's
+   * room: it is a number only, and the POS shows it to managers only.
+   */
+  emitOutboxAttention(propertyId: string, count: number): void {
+    this.emit('outbox.attention_changed', propertyId, { propertyId, count });
+  }
+
   private emit(event: string, propertyId: string, payload: unknown): void {
     try {
       this.gateway.server.to(roomFor(propertyId)).emit(event, payload);

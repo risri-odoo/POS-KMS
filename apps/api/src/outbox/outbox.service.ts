@@ -1,10 +1,11 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, getTableColumns, inArray, type SQL } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, inArray, lt, or, type SQL } from 'drizzle-orm';
 import { haipPostOutbox, orders } from '@stayx/database';
 import { DRIZZLE, type Db } from '../database/database.module.js';
 import { HaipQueue } from '../haip/haip-queue.service.js';
 import { isResolveOnly, manualRetryAllowed, resolveOnlyMessage } from '../haip/no-in-house-guard.js';
 import { PROPERTY_DIRECTORY, haipApiKeyFor, type PropertyDirectory } from '../properties/properties.service.js';
+import { OutboxAlerts, type OutboxSummary } from '../events/outbox-alerts.service.js';
 import type { AuthPrincipal } from '../auth/token-verifier.js';
 import type { ListOutboxDto, ResolveOutboxDto, RetryOutboxDto } from './dto/outbox.dto.js';
 
@@ -28,7 +29,12 @@ export interface OutboxOrderSummary {
  * An outbox row with its order. Row fields stay at the top level. retryAllowed: whether
  * Retry would be accepted now (the screen follows it instead of repeating the rules).
  */
-export type OutboxEntry = OutboxRow & { order: OutboxOrderSummary | null; retryAllowed: boolean };
+export type OutboxEntry = OutboxRow & {
+  order: OutboxOrderSummary | null;
+  retryAllowed: boolean;
+  /** Pending longer than the stuck threshold (bridge on): shown under "Needs attention". */
+  stuck: boolean;
+};
 
 const DEFAULT_LIMIT = 100;
 /** Who did it, from the staff token; null when login is off. Fits the 100-character columns. */
@@ -45,7 +51,13 @@ export class OutboxService {
     @Inject(DRIZZLE) private readonly db: Db,
     private readonly haipQueue: HaipQueue,
     @Inject(PROPERTY_DIRECTORY) private readonly directory: PropertyDirectory,
+    private readonly alerts: OutboxAlerts,
   ) {}
+
+  /** Counts for the badge (managers): needs attention, failed and stuck. */
+  summary(propertyId: string): Promise<OutboxSummary> {
+    return this.alerts.summary(propertyId);
+  }
 
   /** The hotel is active and its HAIP_KEY_* variable is set now. */
   private async hotelKeyReady(propertyId: string): Promise<boolean> {
@@ -58,9 +70,14 @@ export class OutboxService {
    * only rows a person must deal with; "all" shows everything.
    */
   async list(dto: ListOutboxDto): Promise<OutboxEntry[]> {
+    const cutoff = this.alerts.stuckCutoff();
     const conditions: SQL[] = [eq(haipPostOutbox.propertyId, dto.propertyId)];
     if (dto.status) conditions.push(eq(haipPostOutbox.status, dto.status));
-    else if ((dto.view ?? 'attention') === 'attention') conditions.push(inArray(haipPostOutbox.status, [...ACTIONABLE]));
+    else if ((dto.view ?? 'attention') === 'attention') {
+      // Plus charges stuck in pending (bridge on), so a manager sees them too.
+      const stuck = cutoff ? and(eq(haipPostOutbox.status, 'pending'), lt(haipPostOutbox.createdAt, cutoff)) : undefined;
+      conditions.push(stuck ? or(inArray(haipPostOutbox.status, [...ACTIONABLE]), stuck)! : inArray(haipPostOutbox.status, [...ACTIONABLE]));
+    }
     if (dto.parkedReason) conditions.push(eq(haipPostOutbox.parkedReason, dto.parkedReason));
     if (dto.resolutionType) conditions.push(eq(haipPostOutbox.resolutionType, dto.resolutionType));
 
@@ -87,6 +104,7 @@ export class OutboxService {
     return rows.map(({ orderNumber, roomNumber, subtotal, currencyCode, placedBy, deliveredAt, verificationStatus, guestName, ...row }) => ({
       ...row,
       retryAllowed: ACTIONABLE.some((s) => s === row.status) && !isResolveOnly(row.parkedReason, keyReady),
+      stuck: cutoff !== null && row.status === 'pending' && new Date(row.createdAt) < cutoff,
       order:
         orderNumber === null || roomNumber === null || subtotal === null || currencyCode === null
           ? null
@@ -117,6 +135,7 @@ export class OutboxService {
       manualRetryAllowed(keyReady),
       keyReady,
     );
+    await this.alerts.refresh(propertyId);
     await this.haipQueue.enqueue(row.id).catch((error: unknown) => {
       this.logger.warn(`Could not queue retry for ${row.id} (sweeper will pick it up): ${(error as Error)?.message ?? error}`);
     });
@@ -135,7 +154,7 @@ export class OutboxService {
       throw new BadRequestException('haipChargeId is only allowed with resolutionType posted_manually');
     }
     const now = new Date();
-    return this.transitionActionable(id, propertyId, {
+    const row = await this.transitionActionable(id, propertyId, {
       status: postedManually ? 'posted' : 'resolved',
       ...(postedManually ? { postedAt: now } : {}),
       ...(dto.haipChargeId ? { haipChargeId: dto.haipChargeId } : {}),
@@ -145,6 +164,8 @@ export class OutboxService {
       resolvedBy: actor(caller),
       resolvedAt: now,
     });
+    await this.alerts.refresh(propertyId);
+    return row;
   }
 
   /** Atomic: the WHERE requires an actionable status (and `guard`), so it can't race the worker. */
