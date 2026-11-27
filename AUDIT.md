@@ -160,9 +160,9 @@ What POS needs but can't get today:
 ## 7. Prioritised TODO (POS/KMS only)
 
 **A. Blocks a correct integration**
-1. **Capture the stay at order time** (L): on `POST /orders`, resolve room → active reservation and folio via HAIP; store `haip_reservation_id` and `haip_folio_id` on the order (new migration); reject if there's no active stay. Depends on a HAIP lookup (§8 Q1).
-2. **Post to that stay, not the room** (M): the worker must re-check the stay is still in-house before posting, and target the stored folio. Otherwise mark `needs_attention` ("guest checked out / moved"). Depends on HAIP Q2.
-3. **Max-age guard on auto-posting** (S): don't auto-post rows older than N hours, or after a `checked_out` or `room_moved` event; park them for a human.
+1. **Capture the stay at order time: done** (Phase 1 steps 1–5): staff look the room up and confirm the guest; `POST /orders` re-checks the stay with HAIP and stores `haip_reservation_id`, `haip_folio_id`, the confirmed guest name and `verification_status`. When the lookup is unavailable or not configured, staff may place the order as `unverified`. Checked live in §15–§16.
+2. **Post to that stay, not the room: done** (Phase 1 step 6): the worker re-checks the stay before every attempt. It posts to the bound stay, following a room move, and parks the charge as `stay_ended` or `needs_verification` otherwise, never charging another guest. Checked live in §16 (32/32), including re-let plus Retry giving 409.
+3. **Max-age guard on auto-posting: done** (Phase 1 step 6): a charge isn't posted once its stay has ended (checked against HAIP before each attempt, not by event), and while HAIP can't be asked it is retried for up to 6 hours, then parked for a person (`STAY_LOOKUP_MAX_WAIT_MS`, `apps/api/src/haip/stay-recheck.ts`).
 4. **Property mapping table** (M): POS property → HAIP property, key reference, currency, timezone. Validate `propertyId` on every request. Read currency and timezone from `GET /connect/properties/:id`. Removes the single `HAIP_PROPERTY_ID` env.
 5. **Currency enforcement** (S): menu items and orders must use the mapped property currency.
 6. **Run once against real local HAIP: done** (§9, §10). Scripts are in `scripts/`.
