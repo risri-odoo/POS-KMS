@@ -114,3 +114,55 @@ export interface UpdateMenuItemBody {
   category?: string | null;
   isAvailable?: boolean;
 }
+
+/** HAIP folio post statuses (GET /outbox). resolved: closed by a manager without a folio charge. */
+export type OutboxStatus = 'pending' | 'posted' | 'failed' | 'needs_attention' | 'resolved';
+export type ParkedReason = 'no_in_house_guest' | 'stay_ended' | 'needs_verification' | 'wrong_property' | 'haip_rejected';
+export type ResolutionType = 'posted_manually' | 'collected_otherwise' | 'written_off' | 'duplicate_or_error';
+
+/** GET /outbox: one HAIP folio post with the order behind it. */
+export interface OutboxEntry {
+  id: string;
+  propertyId: string;
+  orderId: string;
+  vendorTxnId: string;
+  status: OutboxStatus;
+  attempts: number;
+  lastError: string | null;
+  nextRetryAt: string | null;
+  haipChargeId: string | null;
+  postedAt: string | null;
+  parkedReason: ParkedReason | null;
+  resolutionType: ResolutionType | null;
+  resolutionNote: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  lastRetryBy: string | null;
+  lastRetryAt: string | null;
+  lastRetryNote: string | null;
+  createdAt: string;
+  updatedAt: string;
+  order: {
+    orderNumber: string;
+    roomNumber: string;
+    subtotal: string;
+    currencyCode: string;
+    placedBy: string | null;
+    deliveredAt: string | null;
+    verificationStatus: 'verified' | 'unverified' | null;
+    guestName: string | null;
+  } | null;
+}
+
+export interface OutboxQuery {
+  view?: 'attention' | 'all';
+  parkedReason?: ParkedReason;
+  resolutionType?: ResolutionType;
+}
+
+/** POST /outbox/:id/resolve. haipChargeId only with posted_manually. */
+export interface ResolveOutboxBody {
+  resolutionType: ResolutionType;
+  note: string;
+  haipChargeId?: string;
+}

@@ -38,7 +38,9 @@ interface ToastStackProps {
 export function ToastStack({ position = 'bottom', children }: ToastStackProps) {
   const place = position === 'top' ? 'top-16' : 'bottom-4';
   return (
-    <div className={`fixed left-4 z-[60] flex flex-col gap-2 sm:left-auto sm:max-w-sm right-4 ${place}`} role="log" aria-live="polite">
+    // The stack itself lets clicks through (it is as wide as its widest toast, which would
+    // otherwise block controls beside a shorter one); each toast takes its own clicks.
+    <div className={`pointer-events-none fixed left-4 z-[60] flex flex-col gap-2 sm:left-auto sm:max-w-sm right-4 ${place}`} role="log" aria-live="polite">
       {children}
     </div>
   );
@@ -104,7 +106,7 @@ export function ToastView({ type, message, onDismiss, sticky = false }: ToastVie
 
   return (
     <div
-      className={`relative flex animate-slide-in items-start gap-3 overflow-hidden rounded-xl border-l-4 bg-white px-4 py-3 shadow-lg ${STYLES[type]}`}
+      className={`pointer-events-auto relative flex animate-slide-in items-start gap-3 overflow-hidden rounded-xl border-l-4 bg-white px-4 py-3 shadow-lg ${STYLES[type]}`}
       role={type === 'error' ? 'alert' : 'status'}
       onMouseEnter={pauseTimer}
       onMouseLeave={startTimer}

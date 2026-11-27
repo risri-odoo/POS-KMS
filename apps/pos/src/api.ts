@@ -5,7 +5,10 @@ import type {
   MenuItem,
   Order,
   OrderWithItems,
+  OutboxEntry,
+  OutboxQuery,
   PlaceOrderBody,
+  ResolveOutboxBody,
   StayLookupResponse,
   UpdateMenuItemBody,
 } from './types.js';
@@ -86,6 +89,24 @@ export function placeOrder(body: PlaceOrderBody): Promise<OrderWithItems> {
 /** In-house stays for a room, for staff to confirm the guest before ordering. */
 export function lookupStays(propertyId: string, roomNumber: string): Promise<StayLookupResponse> {
   return request(`/stays/lookup?propertyId=${q(propertyId)}&roomNumber=${q(roomNumber)}`);
+}
+
+/** HAIP folio posts with their orders. By default only those that need a manager. */
+export function listOutbox(propertyId: string, query: OutboxQuery = {}): Promise<OutboxEntry[]> {
+  const params = new URLSearchParams({ propertyId });
+  for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
+  return request(`/outbox?${params.toString()}`);
+}
+
+/** Send it to HAIP again (the same charge id, so HAIP won't post it twice). */
+export function retryOutbox(propertyId: string, id: string, note?: string): Promise<Omit<OutboxEntry, 'order'>> {
+  const body = note?.trim() ? { note: note.trim() } : {};
+  return request(`/outbox/${q(id)}/retry?propertyId=${q(propertyId)}`, { method: 'POST', body: JSON.stringify(body) });
+}
+
+/** Close it without sending: how it was resolved, and why. */
+export function resolveOutbox(propertyId: string, id: string, body: ResolveOutboxBody): Promise<Omit<OutboxEntry, 'order'>> {
+  return request(`/outbox/${q(id)}/resolve?propertyId=${q(propertyId)}`, { method: 'POST', body: JSON.stringify(body) });
 }
 
 export function messageOf(error: unknown): string {

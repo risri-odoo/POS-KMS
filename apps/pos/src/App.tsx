@@ -9,6 +9,7 @@ import { resolvePropertyId } from './config.js';
 import { formatPrice, toMinor } from './money.js';
 import { sortMenu } from './menu.js';
 import { MenuManager } from './components/MenuManager.js';
+import { OutboxPanel } from './components/OutboxPanel.js';
 import { NewOrder } from './components/NewOrder.js';
 import { Notice, type NoticeMessage } from './components/Notice.js';
 import { PropertyForm } from './components/PropertyForm.js';
@@ -71,10 +72,13 @@ function SignedInPos({ requested, signedIn }: { requested: string | null; signed
   return <Pos key={session.sub} propertyId={choice.propertyId} user={signedIn} />;
 }
 
-type Tab = 'order' | 'menu';
+type Tab = 'order' | 'menu' | 'outbox';
 
-function tabFromHash(canEditMenu: boolean): Tab {
-  return canEditMenu && window.location.hash === '#menu' ? 'menu' : 'order';
+/** Menu and Outbox/Errors are for managers; anyone else lands on Orders. */
+export function tabFromHash(hash: string, isManager: boolean): Tab {
+  if (isManager && hash === '#menu') return 'menu';
+  if (isManager && hash === '#outbox') return 'outbox';
+  return 'order';
 }
 
 /**
@@ -88,14 +92,14 @@ export function navFor(tab: Tab, isManager: boolean): NavSection[] {
     { items: [orders, { href: '#menu', label: 'Menu', icon: UtensilsCrossed, active: tab === 'menu' }] },
     {
       title: 'Back office',
-      items: [{ href: '#outbox', label: 'Outbox/Errors', icon: AlertTriangle, disabled: true, hint: 'Soon' }],
+      items: [{ href: '#outbox', label: 'Outbox/Errors', icon: AlertTriangle, active: tab === 'outbox' }],
     },
   ];
 }
 
 function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }) {
   const isManager = user ? canManage(user.session.roles) : true;
-  const [tab, setTab] = useState<Tab>(() => tabFromHash(isManager));
+  const [tab, setTab] = useState<Tab>(() => tabFromHash(window.location.hash, isManager));
   // After signing in again, the order that was being built (§8.6). Read without removing,
   // because StrictMode runs initialisers twice; removed in the effect below.
   const [kept] = useState<CartStash | null>(() => {
@@ -133,7 +137,7 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
   cartRef.current = cart;
 
   useEffect(() => {
-    const onHash = () => setTab(tabFromHash(isManager));
+    const onHash = () => setTab(tabFromHash(window.location.hash, isManager));
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, [isManager]);
@@ -304,8 +308,10 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
           onPlaceOrder={() => void onPlaceOrder()}
           recent={orders}
         />
-      ) : (
+      ) : tab === 'menu' ? (
         <MenuManager propertyId={propertyId} menu={menu} onMenuChange={onMenuChange} notify={notify} />
+      ) : (
+        <OutboxPanel propertyId={propertyId} notify={notify} />
       )}
     </AppShell>
   );
