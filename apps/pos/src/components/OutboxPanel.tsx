@@ -41,10 +41,15 @@ import {
   type ResolveFormErrors,
 } from '../outbox.js';
 import type { OutboxEntry, OutboxQuery, ParkedReason } from '../types.js';
+import { BRIDGE_OFF_MESSAGE } from '../outbox-alerts.js';
 
 interface Props {
   propertyId: string;
   notify: (kind: 'success' | 'error', text: string) => void;
+  /** From GET /outbox/summary; false shows the "posting is off" banner. */
+  bridgeEnabled?: boolean | null;
+  /** After a Retry or Resolve: update the badge now, without waiting for the socket. */
+  onChanged?: () => void;
 }
 
 const REASONS = Object.keys(REASON_LABEL) as ParkedReason[];
@@ -55,7 +60,7 @@ const orderLabel = (entry: OutboxEntry) => (entry.order ? `${entry.order.orderNu
  * Outbox/Errors (managers only, AUDIT.md item 13): HAIP folio charges that need a person.
  * Retry sends a charge again; Resolve closes it with a type and a note.
  */
-export function OutboxPanel({ propertyId, notify }: Props) {
+export function OutboxPanel({ propertyId, notify, bridgeEnabled = null, onChanged }: Props) {
   const [query, setQuery] = useState<OutboxQuery>({ view: 'attention' });
   const [entries, setEntries] = useState<OutboxEntry[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -91,6 +96,7 @@ export function OutboxPanel({ propertyId, notify }: Props) {
     setRetrying(null);
     setResolving(null);
     void refresh();
+    onChanged?.();
   };
   /** 400/409: someone else changed it, or it is no longer actionable. Show why and reload. */
   const failed = (action: string, error: unknown) => {
@@ -105,6 +111,12 @@ export function OutboxPanel({ propertyId, notify }: Props) {
   return (
     <>
       <PageHeader title="Outbox/Errors" icon={AlertTriangle} className="mb-3!" />
+      {bridgeEnabled === false && (
+        // Persistent: as long as posting is off, every delivered order waits here.
+        <p role="alert" className="mb-3 rounded-lg border border-telivity-orange bg-telivity-orange/10 p-3 text-sm font-semibold text-telivity-navy">
+          {BRIDGE_OFF_MESSAGE}
+        </p>
+      )}
       {/* Filters on their own row, left: POS notices stay at the top right until dismissed. */}
       <div className="mb-2 flex flex-wrap items-center gap-2">
         <div role="group" aria-label="Show" className="flex overflow-hidden rounded-lg border border-gray-200">

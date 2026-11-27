@@ -16,6 +16,10 @@ export interface NavItem {
   /** Shown greyed out, for a section that doesn't exist yet. */
   disabled?: boolean;
   hint?: string;
+  /** A count shown beside the label when above 0 (e.g. charges needing attention). */
+  badge?: number;
+  /** A warning dot; the text is its accessible name and tooltip (e.g. "HAIP posting is off"). */
+  alert?: string;
 }
 
 export interface NavSection {
@@ -71,7 +75,7 @@ export function HeaderDate() {
 }
 
 function NavLink({ item, onNavigate }: { item: NavItem; onNavigate: () => void }) {
-  const { href, label, icon: Icon, active, disabled, hint } = item;
+  const { href, label, icon: Icon, active, disabled, hint, badge, alert } = item;
   if (disabled) {
     return (
       <span aria-disabled="true" className="flex cursor-not-allowed items-center gap-3 px-6 py-2.5 text-sm font-medium text-white/40">
@@ -91,7 +95,18 @@ function NavLink({ item, onNavigate }: { item: NavItem; onNavigate: () => void }
       }`}
     >
       <Icon size={18} aria-hidden="true" />
-      {label}
+      <span className="flex-1">{label}</span>
+      {alert && (
+        <span role="img" aria-label={alert} title={alert} className="h-2.5 w-2.5 flex-shrink-0 rounded-full bg-telivity-orange" />
+      )}
+      {!alert && badge !== undefined && badge > 0 && (
+        <span
+          aria-label={`${badge} need attention`}
+          className="min-w-6 rounded-full bg-telivity-orange px-1.5 py-0.5 text-center text-xs font-bold text-telivity-navy tabular-nums"
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </a>
   );
 }

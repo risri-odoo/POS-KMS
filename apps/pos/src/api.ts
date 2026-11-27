@@ -7,6 +7,7 @@ import type {
   OrderWithItems,
   OutboxEntry,
   OutboxQuery,
+  OutboxSummary,
   PlaceOrderBody,
   PublicProperty,
   ResolveOutboxBody,
@@ -102,6 +103,11 @@ export function listOutbox(propertyId: string, query: OutboxQuery = {}): Promise
   const params = new URLSearchParams({ propertyId });
   for (const [key, value] of Object.entries(query)) if (value) params.set(key, value);
   return request(`/outbox?${params.toString()}`);
+}
+
+/** How many charges need a manager, and whether HAIP posting is on (managers only). */
+export function getOutboxSummary(propertyId: string): Promise<OutboxSummary> {
+  return request(`/outbox/summary?propertyId=${q(propertyId)}`);
 }
 
 /** Send it to HAIP again (the same charge id, so HAIP won't post it twice). */

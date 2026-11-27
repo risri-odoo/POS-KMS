@@ -98,6 +98,17 @@ export type StayLookupResponse =
   | { status: 'unavailable' }
   | { status: 'not_configured' };
 
+/** GET /outbox/summary (managers): charges needing attention. */
+export interface OutboxSummary {
+  needsAttention: number;
+  failed: number;
+  stuck: number;
+  total: number;
+  oldestAt: string | null;
+  stuckAfterMinutes: number;
+  bridgeEnabled: boolean;
+}
+
 /** GET /properties/current: what the screen needs about its hotel. */
 export interface PublicProperty {
   id: string;

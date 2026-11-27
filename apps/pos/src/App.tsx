@@ -15,6 +15,8 @@ import { Notice, type NoticeMessage } from './components/Notice.js';
 import { PropertyForm } from './components/PropertyForm.js';
 import type { MenuItem, PublicProperty } from './types.js';
 import { useOrdersFeed } from './useOrdersFeed.js';
+import { useOutboxAlerts } from './useOutboxAlerts.js';
+import { navAlert, pageTitle } from './outbox-alerts.js';
 import { AuthGate, type SignedIn } from './auth/AuthGate.js';
 import { setBeforeSignIn } from './auth/before-sign-in.js';
 import { clearCartStash, peekCartStash, saveCartStash, type CartStash } from './auth/cart-stash.js';
@@ -85,14 +87,14 @@ export function tabFromHash(hash: string, isManager: boolean): Tab {
  * Plain hash links: the active tab lives in the URL, no router. Menu editing and the
  * back office are for managers only (§8.6); with login off everything shows, as before.
  */
-export function navFor(tab: Tab, isManager: boolean): NavSection[] {
+export function navFor(tab: Tab, isManager: boolean, outboxAlert: { badge?: number; alert?: string } = {}): NavSection[] {
   const orders = { href: '#order', label: 'Orders', icon: ClipboardList, active: tab === 'order' };
   if (!isManager) return [{ items: [orders] }];
   return [
     { items: [orders, { href: '#menu', label: 'Menu', icon: UtensilsCrossed, active: tab === 'menu' }] },
     {
       title: 'Back office',
-      items: [{ href: '#outbox', label: 'Outbox/Errors', icon: AlertTriangle, active: tab === 'outbox' }],
+      items: [{ href: '#outbox', label: 'Outbox/Errors', icon: AlertTriangle, active: tab === 'outbox', ...outboxAlert }],
     },
   ];
 }
@@ -100,6 +102,8 @@ export function navFor(tab: Tab, isManager: boolean): NavSection[] {
 function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }) {
   const isManager = user ? canManage(user.session.roles) : true;
   const [tab, setTab] = useState<Tab>(() => tabFromHash(window.location.hash, isManager));
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
   // After signing in again, the order that was being built (§8.6). Read without removing,
   // because StrictMode runs initialisers twice; removed in the effect below.
   const [kept] = useState<CartStash | null>(() => {
@@ -132,7 +136,16 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
 
   const notify = useCallback((kind: NoticeMessage['kind'], text: string) => setNotice({ kind, text }), []);
   const notifyError = useCallback((text: string) => notify('error', text), [notify]);
-  const { orders, connection, addPlaced } = useOrdersFeed(propertyId, notifyError);
+  // Managers: the count of charges needing attention (AUDIT.md item 15). The socket below feeds it live.
+  const alertsHandle = useRef<(e: { propertyId?: string; count?: number }) => void>(() => undefined);
+  const { orders, connection, addPlaced } = useOrdersFeed(propertyId, notifyError, (e) => alertsHandle.current(e));
+  const { alerts, onAttentionChanged, refreshAlerts } = useOutboxAlerts(propertyId, isManager, connection, (text) => {
+    if (tabRef.current !== 'outbox') notify('error', text);
+  });
+  alertsHandle.current = onAttentionChanged;
+  useEffect(() => {
+    document.title = pageTitle('StayX POS', alerts);
+  }, [alerts]);
 
   const cartRef = useRef(cart);
   cartRef.current = cart;
@@ -264,7 +277,7 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
     <AppShell
       brand="StayX POS"
       tagline="Room service"
-      nav={navFor(tab, isManager)}
+      nav={navFor(tab, isManager, navAlert(alerts))}
       connection={connection}
       fill
       mainClassName={`overflow-y-auto p-3 sm:p-4 lg:p-6 ${tab === 'order' ? 'lg:overflow-hidden' : ''}`}
@@ -324,7 +337,7 @@ function Pos({ propertyId, user }: { propertyId: string; user: SignedIn | null }
       ) : tab === 'menu' ? (
         <MenuManager propertyId={propertyId} currencyCode={property?.currencyCode ?? null} menu={menu} onMenuChange={onMenuChange} notify={notify} />
       ) : (
-        <OutboxPanel propertyId={propertyId} notify={notify} />
+        <OutboxPanel propertyId={propertyId} notify={notify} bridgeEnabled={alerts.bridgeEnabled} onChanged={() => void refreshAlerts()} />
       )}
     </AppShell>
   );

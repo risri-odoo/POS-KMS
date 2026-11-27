@@ -78,7 +78,10 @@ export class OutboxAlerts implements OnApplicationBootstrap, OnModuleDestroy {
 
   async summary(propertyId: string): Promise<OutboxSummary> {
     const cutoff = this.stuckCutoff();
-    const isStuck = cutoff ? sql`(${haipPostOutbox.status} = 'pending' and ${haipPostOutbox.createdAt} < ${cutoff})` : sql`false`;
+    // An ISO string with a cast: postgres-js only converts Date parameters for column comparisons, not in raw SQL.
+    const isStuck = cutoff
+      ? sql`(${haipPostOutbox.status} = 'pending' and ${haipPostOutbox.createdAt} < ${cutoff.toISOString()}::timestamptz)`
+      : sql`false`;
     const counted = sql`(${haipPostOutbox.status} in ('needs_attention', 'failed') or ${isStuck})`;
     const [row] = await this.db
       .select({

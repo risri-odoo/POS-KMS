@@ -144,6 +144,8 @@ describe('integration: real API, Postgres, Redis; fake HAIP', () => {
     const attention = await http().get(`/api/v1/outbox?propertyId=${HOTEL}`).set(await manager()).expect(200);
     expect(attention.body.map((e: { id: string; retryAllowed: boolean }) => [e.id, e.retryAllowed])).toEqual([[row.id, false]]);
     await http().post(`/api/v1/outbox/${row.id}/retry?propertyId=${HOTEL}`).set(await manager()).expect(409);
+    const before = await http().get(`/api/v1/outbox/summary?propertyId=${HOTEL}`).set(await manager()).expect(200);
+    expect(before.body).toMatchObject({ needsAttention: 1, failed: 0, stuck: 0, total: 1, bridgeEnabled: true });
 
     const resolved = await http()
       .post(`/api/v1/outbox/${row.id}/resolve?propertyId=${HOTEL}`)
@@ -152,6 +154,8 @@ describe('integration: real API, Postgres, Redis; fake HAIP', () => {
       .expect(200);
     expect(resolved.body).toMatchObject({ status: 'resolved', resolutionType: 'collected_otherwise', resolvedBy: 'pos-manager-1', postedAt: null });
     expect(haip.charges).toHaveLength(1); // still only the first order's charge
+    const after = await http().get(`/api/v1/outbox/summary?propertyId=${HOTEL}`).set(await manager()).expect(200);
+    expect(after.body).toMatchObject({ total: 0 });
   }, 60_000);
 
   it('an order priced in another currency than the hotel’s is refused and nothing is written', async () => {

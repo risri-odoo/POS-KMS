@@ -13,7 +13,12 @@ export type ConnectionState = 'connecting' | 'connected' | 'disconnected';
  * are lost on reconnect) it joins the property room, waits for the ack, then
  * refetches, so no event is missed between the fetch and the join.
  */
-export function useOrdersFeed(propertyId: string, onError: (message: string) => void) {
+export function useOrdersFeed(
+  propertyId: string,
+  onError: (message: string) => void,
+  /** outbox.attention_changed: the hotel's count of charges needing a manager. */
+  onAttentionChanged?: (event: { propertyId?: string; count?: number }) => void,
+) {
   const [feed, dispatch] = useReducer(feedReducer, initialFeedState);
   const [connection, setConnection] = useState<ConnectionState>('connecting');
 
@@ -21,6 +26,8 @@ export function useOrdersFeed(propertyId: string, onError: (message: string) => 
   feedRef.current = feed;
   const onErrorRef = useRef(onError);
   onErrorRef.current = onError;
+  const onAttentionRef = useRef(onAttentionChanged);
+  onAttentionRef.current = onAttentionChanged;
   const generation = useRef(0);
 
   const refetch = useCallback(async () => {
@@ -74,6 +81,7 @@ export function useOrdersFeed(propertyId: string, onError: (message: string) => 
     socket.on('order.status_changed', (order: Order) => {
       if (order?.propertyId === propertyId) dispatch({ type: 'statusChanged', order });
     });
+    socket.on('outbox.attention_changed', (event: { propertyId?: string; count?: number }) => onAttentionRef.current?.(event));
 
     return () => {
       socket.removeAllListeners();
