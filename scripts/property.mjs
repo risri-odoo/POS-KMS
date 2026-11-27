@@ -15,6 +15,11 @@
 // Database: DATABASE_URL (development default: the docker-compose database; required
 // when NODE_ENV=production). --dry-run prints the SQL and connects to nothing.
 // add --if-missing does nothing if the hotel already exists (used by pnpm run setup).
+//
+// Use the SAME --currency and --timezone that HAIP has for the property (its properties
+// record), e.g. --currency INR --timezone Asia/Kolkata for our Ahmedabad hotels. A
+// mismatch makes menu prices, orders and folio charges disagree. The demo hotel uses USD
+// and America/New_York, like HAIP's seeded demo property (haip seed.ts).
 import { createRequire } from 'node:module';
 
 const DEV_DATABASE_URL = 'postgres://stayx:stayx@localhost:5433/stayx_pos';
