@@ -5,6 +5,7 @@ import { NestFactory } from '@nestjs/core';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module.js';
 import { getAllowedOrigins } from './common/cors.js';
+import { swaggerEnabled } from './swagger.js';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,15 +21,21 @@ async function bootstrap() {
     }),
   );
 
-  const config = new DocumentBuilder()
-    .setTitle('StayX POS + KMS')
-    .setDescription('Room-service menu, orders and kitchen display API')
-    .setVersion('0.0.1')
-    .addTag('menu', 'Menu items')
-    .addTag('orders', 'Room-service orders')
-    .addTag('outbox', 'HAIP folio posts (delivered orders)')
-    .build();
-  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
+  if (swaggerEnabled()) {
+    const config = new DocumentBuilder()
+      .setTitle('StayX POS + KMS')
+      .setDescription('Room-service menu, orders and kitchen display API')
+      .setVersion('0.0.1')
+      .addTag('menu', 'Menu items')
+      .addTag('orders', 'Room-service orders')
+      .addTag('outbox', 'HAIP folio posts (delivered orders)')
+      .addTag('stays', 'Guest stay lookup')
+      // With staff login on, paste an access token here to try the routes.
+      .addBearerAuth()
+      .addSecurityRequirements('bearer')
+      .build();
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, config));
+  }
 
   await app.listen(process.env['PORT'] ?? 4000);
 }

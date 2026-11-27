@@ -1,29 +1,31 @@
 /**
- * Staff login for the kitchen board (INTEGRATION_DESIGN.md §8.6). Pure helpers; the
- * sign-in flow is in AuthGate.tsx. The API checks every token; what is read here only
- * decides what the screen shows.
- * TODO(step H): the same helpers live in apps/pos/src/auth/session.ts; share them.
+ * Staff login for the POS and KMS screens (INTEGRATION_DESIGN.md §8.6). Pure helpers.
+ * The API checks every token; what is read here only decides what a screen shows.
  */
 
 /** The POS API client in Keycloak, which holds the POS roles (§8.2). */
 export const POS_API_CLIENT = 'stayx-pos-api';
-export const DEFAULT_CLIENT_ID = 'stayx-kms-web';
 
 export type AuthSettings = { enabled: false } | { enabled: true; authority: string; clientId: string };
+export type OidcSettings = Extract<AuthSettings, { enabled: true }>;
 
 /**
  * Login is on when VITE_OIDC_AUTHORITY is set (e.g. http://localhost:8080/realms/haip).
  * Unset: login off, for local development against an API with POS_AUTH_ENABLED=false.
+ * @param defaultClientId stayx-pos-web for the POS, stayx-kms-web for the kitchen board
  */
-export function authSettings(env: { VITE_OIDC_AUTHORITY?: string; VITE_OIDC_CLIENT_ID?: string }): AuthSettings {
+export function authSettings(
+  env: { VITE_OIDC_AUTHORITY?: string; VITE_OIDC_CLIENT_ID?: string },
+  defaultClientId: string,
+): AuthSettings {
   const authority = env.VITE_OIDC_AUTHORITY?.trim().replace(/\/+$/, '');
   if (!authority) return { enabled: false };
-  return { enabled: true, authority, clientId: env.VITE_OIDC_CLIENT_ID?.trim() || DEFAULT_CLIENT_ID };
+  return { enabled: true, authority, clientId: env.VITE_OIDC_CLIENT_ID?.trim() || defaultClientId };
 }
 
-/** What the screen needs to know about the signed-in user. */
+/** What a screen needs to know about the signed-in user. */
 export interface Session {
-  /** The user's stable id (the token's sub). Who a kept cart belongs to. */
+  /** The user's stable id (the token's sub). */
   sub: string;
   username: string;
   roles: string[];
@@ -56,7 +58,11 @@ export function sessionFromAccessToken(token: string): Session {
   };
 }
 
-/** Running the board: reading orders and changing their status (§8.4). */
+/** Placing orders and looking up stays (§8.4). */
+export const canOrder = (roles: string[]) => roles.includes('pos_staff') || roles.includes('pos_manager');
+/** Menu editing and the outbox. */
+export const canManage = (roles: string[]) => roles.includes('pos_manager');
+/** Running the kitchen board: reading orders and changing their status. */
 export const canUseBoard = (roles: string[]) => roles.includes('pos_kitchen') || roles.includes('pos_manager');
 
 const ROLE_LABEL: Record<string, string> = { pos_staff: 'Staff', pos_manager: 'Manager', pos_kitchen: 'Kitchen' };
@@ -69,10 +75,7 @@ export function roleLabels(roles: string[]): string {
     .join(', ');
 }
 
-export type PropertyChoice =
-  | { kind: 'ok'; propertyId: string }
-  | { kind: 'choose'; options: string[] }
-  | { kind: 'none' };
+export type PropertyChoice = { kind: 'ok'; propertyId: string } | { kind: 'choose'; options: string[] } | { kind: 'none' };
 
 /**
  * Which hotel to open. The requested one (URL or dev default) if the user may use it;

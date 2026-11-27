@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { io } from 'socket.io-client';
 import { listOrders, messageOf } from './api.js';
 import { SOCKET_URL } from './config.js';
-import { authHooks, socketAuth } from './auth/auth-hooks.js';
+import { authHooks, socketAuth } from '@stayx/web-common/auth';
 import { feedReducer, initialFeedState, recentOrders } from './orders-feed.js';
 import type { Order, OrderWithItems, RoomAck } from './types.js';
 

@@ -1,8 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, SIGNED_OUT_MESSAGE, updateOrderStatus } from '../api.js';
-import { setAuthHooks, socketAuth } from './auth-hooks.js';
+import { authSettings, canUseBoard, pickProperty, sessionFromAccessToken, setAuthHooks, socketAuth } from '@stayx/web-common/auth';
 import { sessionReducer } from './recovery.js';
-import { authSettings, canUseBoard, pickProperty, sessionFromAccessToken } from './session.js';
 
 const A = 'a0000001-0000-4000-a000-00000000000a';
 const B = 'b0000002-0000-4000-a000-00000000000b';
@@ -27,12 +26,12 @@ afterEach(() => {
 
 describe('kitchen board login settings', () => {
   it('defaults to the kitchen client, and is off without an authority', () => {
-    expect(authSettings({ VITE_OIDC_AUTHORITY: 'http://localhost:8080/realms/haip' })).toEqual({
+    expect(authSettings({ VITE_OIDC_AUTHORITY: 'http://localhost:8080/realms/haip' }, 'stayx-kms-web')).toEqual({
       enabled: true,
       authority: 'http://localhost:8080/realms/haip',
       clientId: 'stayx-kms-web',
     });
-    expect(authSettings({})).toEqual({ enabled: false });
+    expect(authSettings({}, 'stayx-kms-web')).toEqual({ enabled: false });
   });
 });
 

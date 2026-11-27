@@ -1,15 +1,14 @@
 /**
  * How API calls and the socket get the current access token, and how they report that
- * the session has ended. Set by AuthGate when login is on; null when it is off, and
- * then requests go without a token, as before.
- * TODO(step H): shared with apps/pos/src/auth/auth-hooks.ts in all but sessionEnded's effect.
+ * the session has ended. Set by each screen's AuthGate when login is on; null when it is
+ * off, and then requests go without a token.
  */
 export interface AuthHooks {
   /** The current access token, or null if there is none (the API will then answer 401). */
   getToken(): Promise<string | null>;
   /**
-   * The API or socket refused the token. The board shows "Sign in again" and keeps
-   * displaying what it has; it does not leave the page by itself (§8.6).
+   * The API or socket refused the token. The POS keeps the cart and goes back to
+   * sign-in; the kitchen board keeps showing and offers "Sign in again" (§8.6).
    */
   sessionEnded(): void;
 }
@@ -32,4 +31,10 @@ export function socketAuth(callback: (auth: Record<string, unknown>) => void): v
     (token) => callback(token ? { token } : {}),
     () => callback({}),
   );
+}
+
+/** The Authorization header for a request: the current token when login is on, else none. */
+export async function authorizationHeader(): Promise<Record<string, string>> {
+  const token = current ? await current.getToken().catch(() => null) : null;
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }

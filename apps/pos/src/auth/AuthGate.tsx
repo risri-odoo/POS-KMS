@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts';
+import type { User } from 'oidc-client-ts';
 import { Button } from '@stayx/ui';
+import { oidcClient, sessionFromAccessToken, setAuthHooks, type OidcSettings, type Session } from '@stayx/web-common/auth';
 import { AccountScreen, SigningIn } from '../components/AccountScreens.js';
-import { runBeforeSignIn, setAuthHooks } from './auth-hooks.js';
+import { runBeforeSignIn } from './before-sign-in.js';
 import { signOutClearingCart } from './cart-stash.js';
-import { safeReturnPath, sessionFromAccessToken, type AuthSettings, type Session } from './session.js';
 
 export interface SignedIn {
   session: Session;
@@ -12,72 +12,21 @@ export interface SignedIn {
 }
 
 type GateState = { kind: 'loading' } | { kind: 'signed-in'; session: Session } | { kind: 'error'; message: string };
-type OidcSettings = Extract<AuthSettings, { enabled: true }>;
 
-// One manager and one start per page load: React StrictMode runs effects twice in
-// development, and the redirect callback can only be completed once.
-let manager: UserManager | null = null;
-let starting: Promise<User | null> | null = null;
-let redirecting = false;
-
-function managerFor(settings: OidcSettings): UserManager {
-  manager ??= new UserManager({
-    authority: settings.authority,
-    client_id: settings.clientId,
-    redirect_uri: `${window.location.origin}/`,
-    post_logout_redirect_uri: `${window.location.origin}/`,
-    response_type: 'code', // authorization code + PKCE; a public client, no secret
-    scope: 'openid',
-    // Renews shortly before expiry (with the refresh token Keycloak issues).
-    automaticSilentRenew: true,
-    // This tab only; closing it signs the POS out on this device.
-    userStore: new WebStorageStateStore({ store: window.sessionStorage }),
-  });
-  return manager;
-}
-
-/** Finishes a sign-in redirect if we are on one, else returns the stored user if still usable. */
-function start(m: UserManager): Promise<User | null> {
-  starting ??= (async () => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('error') && params.has('state')) {
-      throw new Error(params.get('error_description') ?? params.get('error') ?? 'sign-in failed');
-    }
-    if (params.has('code') && params.has('state')) {
-      const user = await m.signinRedirectCallback();
-      // Back to where the user was, without the code in the address bar.
-      window.history.replaceState(null, '', safeReturnPath((user.state as { returnTo?: unknown } | undefined)?.returnTo));
-      return user;
-    }
-    const user = await m.getUser();
-    if (user && !user.expired) return user;
-    if (user?.refresh_token) return m.signinSilent().catch(() => null);
-    return null;
-  })();
-  return starting;
-}
-
-/** Leave for the sign-in page, keeping the cart. Only once, however many calls fail at the same time. */
-function signIn(m: UserManager, onError: (message: string) => void) {
-  if (redirecting) return;
-  redirecting = true;
-  runBeforeSignIn();
-  const { pathname, search, hash } = window.location;
-  m.signinRedirect({ state: { returnTo: pathname + search + hash } }).catch((error: unknown) => {
-    redirecting = false;
-    onError(error instanceof Error ? error.message : 'could not reach the sign-in page');
-  });
-}
+/** This tab only: shared terminals change hands, so closing the tab signs the POS out (§8.6). */
+const client = (settings: OidcSettings) => oidcClient(settings, window.sessionStorage);
 
 /**
  * Signs the user in (INTEGRATION_DESIGN.md §8.6) and renders the POS for them. While
- * mounted, API calls and the socket carry the user's access token.
+ * mounted, API calls and the socket carry the user's access token. When the session
+ * ends, the order being built is kept and the page goes back to sign-in.
  */
 export function AuthGate({ settings, children }: { settings: OidcSettings; children: (signedIn: SignedIn) => ReactNode }) {
   const [state, setState] = useState<GateState>({ kind: 'loading' });
 
   useEffect(() => {
-    const m = managerFor(settings);
+    const oidc = client(settings);
+    const m = oidc.manager;
     let alive = true;
     const fail = (message: string) => {
       if (alive) setState({ kind: 'error', message });
@@ -85,19 +34,13 @@ export function AuthGate({ settings, children }: { settings: OidcSettings; child
     const loaded = (user: User) => {
       if (alive) setState({ kind: 'signed-in', session: sessionFromAccessToken(user.access_token) });
     };
-    const ended = () => signIn(m, fail);
+    const ended = () => oidc.signIn(fail, runBeforeSignIn);
 
-    setAuthHooks({
-      getToken: async () => {
-        const user = await m.getUser();
-        return user && !user.expired ? user.access_token : null;
-      },
-      sessionEnded: ended,
-    });
+    setAuthHooks({ getToken: () => oidc.accessToken(), sessionEnded: ended });
     m.events.addUserLoaded(loaded); // also after each silent renewal: roles may have changed
     m.events.addAccessTokenExpired(ended); // renewal failed (e.g. the Keycloak session ended)
 
-    start(m).then(
+    oidc.start().then(
       (user) => (user ? loaded(user) : ended()),
       (error: unknown) => fail(error instanceof Error ? error.message : 'sign-in failed'),
     );
@@ -129,7 +72,7 @@ export function AuthGate({ settings, children }: { settings: OidcSettings; child
     } catch {
       // blocked storage: nothing was kept there
     }
-    void signOutClearingCart(storage, () => managerFor(settings).signoutRedirect()).catch(() => undefined);
+    void signOutClearingCart(storage, () => client(settings).manager.signoutRedirect()).catch(() => undefined);
   };
   return <>{children({ session: state.session, signOut })}</>;
 }

@@ -1,5 +1,5 @@
 import { API_URL } from './config.js';
-import { authHooks } from './auth/auth-hooks.js';
+import { authHooks } from '@stayx/web-common/auth';
 import type {
   CreateMenuItemBody,
   MenuItem,

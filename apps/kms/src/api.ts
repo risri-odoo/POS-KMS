@@ -1,5 +1,5 @@
 import { API_URL } from './config.js';
-import { authHooks } from './auth/auth-hooks.js';
+import { authHooks } from '@stayx/web-common/auth';
 import { ACTIVE_STATUSES, isActiveStatus, type Order, type OrderStatus, type OrderWithItems } from './types.js';
 
 /** An HTTP error from the API, keeping the status so callers can react to 400/409. */

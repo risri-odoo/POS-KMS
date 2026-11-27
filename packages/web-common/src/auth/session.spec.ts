@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { authSettings, canManage, canOrder, pickProperty, roleLabels, safeReturnPath, sessionFromAccessToken } from './session.js';
+import { authSettings, canManage, canOrder, canUseBoard, pickProperty, roleLabels, safeReturnPath, sessionFromAccessToken } from './session.js';
 
 const A = 'a0000001-0000-4000-a000-00000000000a';
 const B = 'b0000002-0000-4000-a000-00000000000b';
@@ -12,17 +12,17 @@ function tokenWith(claims: Record<string, unknown>): string {
 
 describe('authSettings', () => {
   it('is off without an authority (local development)', () => {
-    expect(authSettings({})).toEqual({ enabled: false });
-    expect(authSettings({ VITE_OIDC_AUTHORITY: '  ' })).toEqual({ enabled: false });
+    expect(authSettings({}, 'stayx-pos-web')).toEqual({ enabled: false });
+    expect(authSettings({ VITE_OIDC_AUTHORITY: '  ' }, 'stayx-pos-web')).toEqual({ enabled: false });
   });
 
   it('is on with an authority, defaulting the client to stayx-pos-web', () => {
-    expect(authSettings({ VITE_OIDC_AUTHORITY: 'http://localhost:8080/realms/haip/' })).toEqual({
+    expect(authSettings({ VITE_OIDC_AUTHORITY: 'http://localhost:8080/realms/haip/' }, 'stayx-pos-web')).toEqual({
       enabled: true,
       authority: 'http://localhost:8080/realms/haip',
       clientId: 'stayx-pos-web',
     });
-    expect(authSettings({ VITE_OIDC_AUTHORITY: 'https://id.example', VITE_OIDC_CLIENT_ID: 'pos-x' })).toMatchObject({ clientId: 'pos-x' });
+    expect(authSettings({ VITE_OIDC_AUTHORITY: 'https://id.example', VITE_OIDC_CLIENT_ID: 'pos-x' }, 'stayx-pos-web')).toMatchObject({ clientId: 'pos-x' });
   });
 });
 
@@ -94,5 +94,17 @@ describe('safeReturnPath', () => {
   it('keeps paths on this site and rejects everything else', () => {
     expect(safeReturnPath('/?propertyId=x#menu')).toBe('/?propertyId=x#menu');
     for (const bad of ['//evil.example', '/\\evil.example', 'https://evil.example', '', undefined, 42]) expect(safeReturnPath(bad)).toBe('/');
+  });
+});
+
+describe('canUseBoard', () => {
+  it('kitchen and managers run the board; staff-only accounts do not', () => {
+    expect(canUseBoard(['pos_kitchen'])).toBe(true);
+    expect(canUseBoard(['pos_manager'])).toBe(true);
+    expect(canUseBoard(['pos_staff'])).toBe(false);
+  });
+
+  it('the kitchen client is just a different default', () => {
+    expect(authSettings({ VITE_OIDC_AUTHORITY: 'http://localhost:8080/realms/haip' }, 'stayx-kms-web')).toMatchObject({ clientId: 'stayx-kms-web' });
   });
 });

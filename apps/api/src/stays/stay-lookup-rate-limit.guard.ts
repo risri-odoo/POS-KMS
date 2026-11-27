@@ -22,9 +22,10 @@ function fromEnv(env: NodeJS.ProcessEnv = process.env): RateLimitOptions {
  * Per-IP limit on GET /stays/lookup (default 30 per minute), to slow down anyone
  * walking room numbers to collect guest names.
  *
- * TODO(auth, AUDIT.md §7 items 7-10): this is a stopgap. The lookup must be
- * behind staff login before production. Counts are in memory, per process, and
- * keyed by the socket address: behind a proxy every client shares one IP.
+ * A second line behind staff login (only pos_staff and pos_manager may call the
+ * lookup, for their own hotels; INTEGRATION_DESIGN.md §8.4). Known limits: counts
+ * are in memory, per process, and keyed by the socket address, so behind a proxy
+ * every client shares one IP. Keying by the signed-in user would now be possible.
  */
 @Injectable()
 export class StayLookupRateLimitGuard implements CanActivate {

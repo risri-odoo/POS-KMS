@@ -11,10 +11,10 @@ import { ACTIVE_STATUSES, type OrderWithItems } from './types.js';
 import { useKitchen } from './useKitchen.js';
 import { AccountMessage, AuthGate, type SignedIn } from './auth/AuthGate.js';
 import { LOST_BANNER } from './auth/recovery.js';
-import { authSettings, canUseBoard, pickProperty, roleLabels } from './auth/session.js';
+import { authSettings, canUseBoard, pickProperty, roleLabels } from '@stayx/web-common/auth';
 
 /** Read once: AuthGate's effect depends on this object staying the same. */
-const AUTH = authSettings(import.meta.env);
+const AUTH = authSettings(import.meta.env, 'stayx-kms-web');
 
 const CLOCK_TICK_MS = 30_000;
 

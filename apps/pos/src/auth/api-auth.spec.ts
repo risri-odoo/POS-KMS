@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, SESSION_ENDED_MESSAGE, listOrders } from '../api.js';
-import { setAuthHooks, socketAuth } from './auth-hooks.js';
+import { setAuthHooks, socketAuth } from '@stayx/web-common/auth';
 
 const A = 'a0000001-0000-4000-a000-00000000000a';
 

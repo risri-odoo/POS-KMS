@@ -3,7 +3,7 @@ import { io } from 'socket.io-client';
 import { ApiError, fetchActiveBoard, getOrder, updateOrderStatus } from './api.js';
 import { boardReducer, initialBoardState, needsFetch } from './board.js';
 import { SOCKET_URL } from './config.js';
-import { authHooks, socketAuth } from './auth/auth-hooks.js';
+import { authHooks, socketAuth } from '@stayx/web-common/auth';
 import type { Order, OrderStatus, OrderWithItems, RoomAck } from './types.js';
 
 export type ConnectionState = 'connecting' | 'connected' | 'disconnected';

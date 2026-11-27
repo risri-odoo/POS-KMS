@@ -168,12 +168,12 @@ What POS needs but can't get today:
 6. **Run once against real local HAIP: done** (§9, §10). Scripts are in `scripts/`.
 
 **B. Security**
-7. **API authentication** (M): validate HAIP Keycloak JWTs (JWKS, `iss`, `aud`, `azp`) with a global guard and `@Public()` only for health.
-8. **Role guard** (M): restaurant staff / kitchen / manager / admin, mapped per route. `outbox/resolve` and menu edits for manager+ only.
-9. **Socket auth** (S): require the JWT on the handshake; check property membership on `joinProperty`.
-10. **UI login** (M): OIDC PKCE in `apps/pos` and `apps/kms`, sending the bearer token on fetch and the socket.
-   - **Must happen before production because of the guest lookup (added 2026-11-22, Phase 1 step 4):** `GET /api/v1/stays/lookup` returns in-house guests' first names and surname initials by room, and it is unauthenticated like the rest of the API. Anyone who can reach the API could walk room numbers to list guests. Items 7–10 must put it behind staff login (and item 8 limit it to restaurant staff).
-   - **Stopgap only:** a per-IP limit of 30 lookups per minute (`STAY_LOOKUP_RATE_LIMIT_MAX`, `..._WINDOW_MS`). Counts are in memory and per process, and keyed by the socket address, so behind a proxy all clients share one limit.
+7. **API authentication: done** (login Step B, `c078581`): global guard checks the HAIP Keycloak JWT (JWKS, RS256, `iss`, `aud`, `azp`, `exp`); `@Public()` only for `GET /`; production refuses to start with login off.
+8. **Role guard: done** (Step C, `ad99967`, `ef22701`): `pos_staff` / `pos_kitchen` / `pos_manager` client roles per route, a test that every route has a rule, and the request's `propertyId` checked against `property_ids`; another hotel's record gives 404. Outbox and menu edits are manager-only. No HAIP admin bypass.
+9. **Socket auth: done** (Step D, `dbd6feb`): token on the handshake, POS role required, `joinProperty` only for the token's hotels, disconnect at expiry.
+10. **UI login: done** (Steps E–F, `eb704b7`, `6ed56c4`, `7a7043e`; shared helpers and a strict CSP in Step H): OIDC code + PKCE in both screens, the token on every request and the socket. Checked live against Keycloak in §17 (37/37).
+   - **Guest lookup (added 2026-11-22, Phase 1 step 4): closed.** `GET /api/v1/stays/lookup` is now behind staff login, for `pos_staff` and `pos_manager` only, within their hotels (§17 checked it live).
+   - **The per-IP limit stays as a second line** (30 lookups per minute, `STAY_LOOKUP_RATE_LIMIT_MAX`, `..._WINDOW_MS`). Counts are in memory, per process, and keyed by the socket address, so behind a proxy all clients share one limit; keying by the signed-in user is now possible.
    - **Same exposure on the kitchen socket:** order payloads now include `verifiedGuestName` (for example "Ada L."), and the socket has no auth either (item 9).
 11. **Hardening** (S): gate Swagger outside dev, rate limiting, `/health`, no default DB credentials outside dev.
 
@@ -559,7 +559,7 @@ Real Keycloak 24.0.5 (local realm `haip`), the POS API with login on, and the PO
   - public clients `stayx-pos-web` and `stayx-kms-web` (PKCE S256, no password grant, only the POS roles in scope, audience and `property_ids` mappers);
   - users `pos-staff-1`, `pos-manager-1` and `kitchen-t1` (hotel A) and `kitchen-t2` (hotel B).
 
-  The clients and users are kept for local development; `teardown-pos-login.ps1` removes them.
+  The clients and users are kept for local development; `teardown-pos-login.ps1` removes them. **The teardown script is syntax-checked only** (PowerShell parser, no errors); it has not been run against Keycloak, since the clients and users were kept.
 - **Realm-wide change:** the user profile's unmanaged attribute policy is set to `ADMIN_EDIT` (previously unset), because Keycloak 24 otherwise drops `property_ids`. The previous value is saved for the teardown. Refresh token rotation was **left off** (realm-only, §7 N15).
 
 **Result: 37 of 37 checks passed.**

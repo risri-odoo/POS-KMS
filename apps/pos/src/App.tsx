@@ -15,13 +15,13 @@ import { PropertyForm } from './components/PropertyForm.js';
 import type { MenuItem } from './types.js';
 import { useOrdersFeed } from './useOrdersFeed.js';
 import { AuthGate, type SignedIn } from './auth/AuthGate.js';
-import { setBeforeSignIn } from './auth/auth-hooks.js';
+import { setBeforeSignIn } from './auth/before-sign-in.js';
 import { clearCartStash, peekCartStash, saveCartStash, type CartStash } from './auth/cart-stash.js';
-import { authSettings, canManage, canOrder, pickProperty, roleLabels } from './auth/session.js';
+import { authSettings, canManage, canOrder, pickProperty, roleLabels } from '@stayx/web-common/auth';
 import { AccountScreen, PropertyChooser } from './components/AccountScreens.js';
 
 /** Read once: AuthGate's effect depends on this object staying the same. */
-const AUTH = authSettings(import.meta.env);
+const AUTH = authSettings(import.meta.env, 'stayx-pos-web');
 
 /** sessionStorage, or null where the browser blocks it. */
 function tabStorage(): Storage | null {

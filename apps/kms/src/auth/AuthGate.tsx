@@ -1,9 +1,8 @@
 import { useEffect, useReducer, useState, type ReactNode } from 'react';
-import { UserManager, WebStorageStateStore, type User } from 'oidc-client-ts';
+import type { User } from 'oidc-client-ts';
 import { Button, Card, Spinner } from '@stayx/ui';
-import { setAuthHooks } from './auth-hooks.js';
+import { oidcClient, sessionFromAccessToken, setAuthHooks, type OidcSettings, type Session } from '@stayx/web-common/auth';
 import { SILENT_RETRY_MS, sessionReducer, type SessionStatus } from './recovery.js';
-import { safeReturnPath, sessionFromAccessToken, type AuthSettings, type Session } from './session.js';
 
 export interface SignedIn {
   session: Session;
@@ -15,58 +14,13 @@ export interface SignedIn {
   signOut: () => void;
 }
 
-type OidcSettings = Extract<AuthSettings, { enabled: true }>;
 type GateState = { kind: 'loading' } | { kind: 'signed-in'; session: Session; version: number } | { kind: 'error'; message: string };
 
-// One manager and one start per page load (StrictMode runs effects twice in development).
-let manager: UserManager | null = null;
-let starting: Promise<User | null> | null = null;
-let redirecting = false;
-
-function managerFor(settings: OidcSettings): UserManager {
-  manager ??= new UserManager({
-    authority: settings.authority,
-    client_id: settings.clientId,
-    redirect_uri: `${window.location.origin}/`,
-    post_logout_redirect_uri: `${window.location.origin}/`,
-    response_type: 'code', // authorization code + PKCE; a public client, no secret
-    scope: 'openid',
-    automaticSilentRenew: true,
-    // localStorage, unlike the POS: a kitchen tablet should stay signed in across a
-    // browser restart, within the provider's session limits (§8.6, tablet sessions).
-    userStore: new WebStorageStateStore({ store: window.localStorage }),
-  });
-  return manager;
-}
-
-function start(m: UserManager): Promise<User | null> {
-  starting ??= (async () => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('error') && params.has('state')) {
-      throw new Error(params.get('error_description') ?? params.get('error') ?? 'sign-in failed');
-    }
-    if (params.has('code') && params.has('state')) {
-      const user = await m.signinRedirectCallback();
-      window.history.replaceState(null, '', safeReturnPath((user.state as { returnTo?: unknown } | undefined)?.returnTo));
-      return user;
-    }
-    const user = await m.getUser();
-    if (user && !user.expired) return user;
-    if (user?.refresh_token) return m.signinSilent().catch(() => null);
-    return null;
-  })();
-  return starting;
-}
-
-function signIn(m: UserManager, onError: (message: string) => void) {
-  if (redirecting) return;
-  redirecting = true;
-  const { pathname, search, hash } = window.location;
-  m.signinRedirect({ state: { returnTo: pathname + search + hash } }).catch((error: unknown) => {
-    redirecting = false;
-    onError(error instanceof Error ? error.message : 'could not reach the sign-in page');
-  });
-}
+/**
+ * localStorage, unlike the POS: a kitchen tablet stays signed in across a browser restart,
+ * within the provider's session limits. Decided 2026-11-26 (INTEGRATION_DESIGN.md §8.6).
+ */
+const client = (settings: OidcSettings) => oidcClient(settings, window.localStorage);
 
 function Centered({ children }: { children: ReactNode }) {
   return (
@@ -88,7 +42,8 @@ export function AuthGate({ settings, children }: { settings: OidcSettings; child
   const [status, dispatchStatus] = useReducer(sessionReducer, 'active');
 
   useEffect(() => {
-    const m = managerFor(settings);
+    const oidc = client(settings);
+    const m = oidc.manager;
     let alive = true;
     let signedIn = false;
     const fail = (message: string) => {
@@ -101,19 +56,13 @@ export function AuthGate({ settings, children }: { settings: OidcSettings; child
       setState((s) => ({ kind: 'signed-in', session: sessionFromAccessToken(user.access_token), version: s.kind === 'signed-in' ? s.version + 1 : 1 }));
     };
     // Before the first sign-in there is no board to keep: go to the sign-in page.
-    const ended = () => (signedIn ? dispatchStatus({ type: 'ended' }) : signIn(m, fail));
+    const ended = () => (signedIn ? dispatchStatus({ type: 'ended' }) : oidc.signIn(fail));
 
-    setAuthHooks({
-      getToken: async () => {
-        const user = await m.getUser();
-        return user && !user.expired ? user.access_token : null;
-      },
-      sessionEnded: ended,
-    });
+    setAuthHooks({ getToken: () => oidc.accessToken(), sessionEnded: ended });
     m.events.addUserLoaded(loaded);
     m.events.addAccessTokenExpired(ended);
 
-    start(m).then(
+    oidc.start().then(
       (user) => (user ? loaded(user) : ended()),
       (error: unknown) => fail(error instanceof Error ? error.message : 'sign-in failed'),
     );
@@ -129,7 +78,7 @@ export function AuthGate({ settings, children }: { settings: OidcSettings; child
   // While signed out, keep trying a quiet renewal (Wi-Fi blips); success fires addUserLoaded.
   useEffect(() => {
     if (status !== 'lost') return;
-    const m = managerFor(settings);
+    const m = client(settings).manager;
     const timer = setInterval(() => void m.signinSilent().catch(() => undefined), SILENT_RETRY_MS);
     return () => clearInterval(timer);
   }, [status, settings]);
@@ -153,15 +102,15 @@ export function AuthGate({ settings, children }: { settings: OidcSettings; child
     );
   }
 
-  const m = managerFor(settings);
+  const oidc = client(settings);
   return (
     <>
       {children({
         session: state.session,
         status,
         version: state.version,
-        signInAgain: () => signIn(m, (message) => setState({ kind: 'error', message })),
-        signOut: () => void m.signoutRedirect().catch(() => undefined),
+        signInAgain: () => oidc.signIn((message) => setState({ kind: 'error', message })),
+        signOut: () => void oidc.manager.signoutRedirect().catch(() => undefined),
       })}
     </>
   );
